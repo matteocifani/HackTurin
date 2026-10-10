@@ -74,10 +74,14 @@
       <div class="stats">
         <div>Errore medio camera<br><b id="mae">-</b></div>
         <div>Misure in coppia<br><b id="npairs">0</b></div>
-        <div>Correzione camera (US / camera)<br><b id="ratio">-</b></div>
+        <div>Correzione residua (US / camera)<br><b id="ratio">-</b></div>
         <div>Anticipo della camera<br><b id="lead">-</b></div>
+        <div>Calibrazione automatica camera<br><b id="calk">-</b></div>
+        <div>Modello<br><b id="model" style="font-size:14px">-</b></div>
       </div>
-      <div class="small" style="margin-top:6px">Anticipo = quanto prima la camera ha visto arrivare l'oggetto rispetto all'ultrasuono, nell'ultimo avvicinamento.
+      <div class="small" style="margin-top:6px">Calibrazione = quando camera e ultrasuono vedono lo stesso oggetto
+        dove l'ultrasuono è affidabile, la Pi corregge da sola la distanza della camera (la salva per il prossimo avvio).
+        Anticipo = quanto prima la camera ha visto arrivare l'oggetto rispetto all'ultrasuono, nell'ultimo avvicinamento.
         <button id="reset">azzera</button></div>
     </div>
     <div class="panel">
@@ -125,7 +129,8 @@ async function tick() {
   const ct = S.cam_ok ? inLine[0] : null;
   const camM = ct ? ct.d : null;
   setCard("cam", camM, S.cam_ok ? "niente in linea" : "camera ferma");
-  $("cams").textContent = ct ? `${ct.cls}${ct.ttc != null ? " · TTC " + ct.ttc + " s" : ""} · stima dalla larghezza` +
+  $("cams").textContent = ct ? `${ct.cls}${ct.conf != null ? " " + Math.round(ct.conf * 100) + "%" : ""}${ct.ttc != null ? " · TTC " + ct.ttc + " s" : ""} · dalla larghezza` +
+    (S.cal && S.cal.on && S.cal.k !== 1 ? `, calibrata ×${S.cal.k.toFixed(2)}` : "") +
     (S.scale && S.scale !== 1 ? ` (scala ${S.scale})` : "") : `${S.fps} fps · ${(S.tracks || []).length} oggetti visti`;
 
   // ultrasuono
@@ -187,6 +192,9 @@ async function tick() {
     $("ratio").textContent = "× " + rs[rs.length >> 1].toFixed(2);
   } else { $("mae").textContent = "-"; $("ratio").textContent = "-"; }
   $("npairs").textContent = pairs.length;
+  $("calk").textContent = !S.cal || !S.cal.on ? "spenta" : S.cal.n < 8 && S.cal.k === 1 ? `in attesa (${S.cal.n}/8)` :
+    `× ${S.cal.k.toFixed(2)} (${S.cal.n} misure)`;
+  $("model").textContent = S.model ? `${S.model.replace("_ncnn_model", "")} · ${S.fps} fps` : S.mode;
 
   // anticipo: da quando la camera vede l'oggetto in linea a quando entra nella portata dell'ultrasuono
   if (camM != null) {
@@ -200,7 +208,7 @@ async function tick() {
   drawHist(now);
 
   const rows = (S.tracks || []).map(t =>
-    `<tr><td>${t.id}</td><td>${t.cls}</td><td>${t.d != null ? t.d.toFixed(1) + " m" : "-"}</td>` +
+    `<tr><td>${t.id}</td><td>${t.cls}${t.conf != null ? " " + Math.round(t.conf * 100) + "%" : ""}</td><td>${fmt(t.d)}</td>` +
     `<td>${t.lat != null ? (t.zone === "B" ? "in linea" : t.lat > 0 ? "sinistra" : "destra") : "-"}</td>` +
     `<td>${t.ttc != null ? t.ttc + " s" : "-"}</td></tr>`);
   $("dets").innerHTML = rows.join("") || `<tr><td colspan="5" class="small">nessun veicolo/persona</td></tr>`;

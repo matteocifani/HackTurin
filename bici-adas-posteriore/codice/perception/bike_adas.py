@@ -2,10 +2,12 @@
 """
 Guardaspalle - il "cuore" sulla bici (Raspberry Pi 4).
 
-Webcam posteriore -> YOLO (NCNN) + ByteTrack -> per ogni veicolo:
+Webcam posteriore -> YOLO26n (NCNN, ingresso rettangolare 192x480) + ByteTrack -> per ogni veicolo:
   tempo all'impatto (TTC) dalla crescita del riquadro, posizione laterale,
   distanza di sorpasso prevista -> rischio per zona (SX / DIETRO / DX).
 HC-SR04 a sinistra -> distanza reale di sorpasso (verifica la previsione).
+HC-SR04 dietro (--us-side B) -> distanza esatta da vicino, fusa con la camera; quando i due vedono
+  lo stesso oggetto l'ultrasuono calibra da solo la distanza della camera (logs/calibrazione.json).
 
 Uscite:
   GET  /risk     riga per il casco (UNO Q):  R,L,B,R,cls,ttc_ds,seq,age_ms,cam_ok
@@ -18,6 +20,7 @@ Esempi:
   python3 bike_adas.py --fake                                # traffico simulato, senza camera né YOLO
   python3 bike_adas.py --source traffico.mp4 --realtime --loop --stream
   python3 bike_adas.py --source 0 --us-trig 23 --us-echo 24 --save giro.mp4 --clips
+  python3 bike_adas.py --model yolo26n_256x640_ncnn_model ...   # più preciso da lontano, ~40% più lento
 """
 
 import argparse
@@ -27,6 +30,7 @@ import json
 import math
 import os
 import random
+import shutil
 import sys
 import threading
 import time
@@ -64,10 +68,11 @@ def parse_args():
     g.add_argument("--realtime", action="store_true", help="file video alla velocità reale (salta fotogrammi)")
     g.add_argument("--loop", action="store_true", help="ripeti il file video")
     g = p.add_argument_group("modello")
-    g.add_argument("--model", default="yolo11n_ncnn_model", help="modello NCNN (creato da yolo11n.pt se manca) o .pt")
-    g.add_argument("--imgsz", type=int, default=320, help="stessa dimensione usata nell'export NCNN")
-    g.add_argument("--conf", type=float, default=0.3)
-    g.add_argument("--tracker", default="bytetrack.yaml")
+    g.add_argument("--model", default="yolo26n_192x480_ncnn_model",
+                   help="cartella NCNN <modello>_<alto>x<largo>_ncnn_model (se manca la crea da <modello>.pt) o .pt")
+    g.add_argument("--imgsz", default=None, help="es. 320 o 192,480; se omesso lo legge dal modello NCNN")
+    g.add_argument("--conf", type=float, default=0.25, help="confidenza per agganciare un riquadro (ByteTrack)")
+    g.add_argument("--tracker", default="bytetrack", help="bytetrack o botsort")
     g.add_argument("--crop", default="0,0.2,1,0.9", help="zona analizzata, frazioni x0,y0,x1,y1")
     g = p.add_argument_group("camera")
     g.add_argument("--hfov", type=float, default=80.0, help="campo visivo orizzontale (gradi)")
@@ -103,6 +108,11 @@ def parse_args():
     g.add_argument("--us-blend", type=float, default=20.0, help="cm di passaggio graduale tra ultrasuono e camera")
     g.add_argument("--scale", type=float, default=1.0,
                    help="scala dei veicoli per la demo in miniatura (es. 0.05 = macchinina 1:20)")
+    g.add_argument("--us-hz", type=float, default=20.0, help="impulsi al secondo dell'HC-SR04 (GPIO)")
+    g.add_argument("--us-max", type=float, default=300.0, help="cm: oltre, la lettura vale 'niente' (a 3,3 V è instabile)")
+    g.add_argument("--temp", type=float, default=20.0, help="temperatura dell'aria (°C) per la velocità del suono")
+    g.add_argument("--no-autocal", dest="autocal", action="store_false",
+                   help="non calibrare la distanza della camera con l'ultrasuono")
     g = p.add_argument_group("uscite")
     g.add_argument("--port", type=int, default=8000)
     g.add_argument("--log-dir", default=os.path.join(HERE, "logs"))
@@ -129,6 +139,42 @@ def linfit(xs, ys):
         return 0.0, my
     b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
     return b, my - b * mx
+
+
+def parse_imgsz(v):
+    """'320' -> 320, '192,480' o '192x480' -> [192, 480] (alto, largo, multipli di 32)."""
+    if v is None or v == "":
+        return None
+    p = [int(x) for x in str(v).replace("x", ",").split(",") if x.strip()]
+    return p[0] if len(p) == 1 else p[:2]
+
+
+def fmt_d(m):
+    """Distanza leggibile: cm sotto i 2 m (demo in scala), metri sopra."""
+    if m is None or not math.isfinite(m):
+        return "-"
+    return f"{m * 100:.0f}cm" if m < 2 else f"{m:.1f}m" if m < 10 else f"{m:.0f}m"
+
+
+class AlphaBeta:
+    """Filtro alfa-beta (un Kalman a guadagno fisso): segue valore e velocità, quindi leviga il
+    tremolio senza restare indietro quando l'oggetto si avvicina. I salti oltre 'gate' sono tagliati."""
+
+    def __init__(self, alpha, beta, gate, reset_after=0.7):
+        self.alpha, self.beta, self.gate, self.reset_after = alpha, beta, gate, reset_after
+        self.x, self.v, self.t = None, 0.0, 0.0
+
+    def update(self, z, t):
+        if self.x is None or t - self.t > self.reset_after:
+            self.x, self.v, self.t = z, 0.0, t
+            return self.x
+        dt = max(1e-3, t - self.t)
+        pred = self.x + self.v * dt
+        r = clamp(z - pred, -self.gate, self.gate)
+        self.x = pred + self.alpha * r
+        self.v += self.beta * r / dt
+        self.t = t
+        return self.x
 
 
 def fin(x, nd=2):
@@ -217,6 +263,9 @@ class Track:
         self.bbox = (0, 0, 0, 0)
         self.edge = False
         self.d = INF
+        self.d_raw = INF  # prima della calibrazione con l'ultrasuono
+        self.lw = AlphaBeta(0.5, 0.1, 0.3)  # log della larghezza del riquadro, levigato
+        self.conf = None
         self.min_d = INF
         self.lat = 0.0
         self.vlat = 0.0
@@ -261,16 +310,32 @@ class Estimator:
         self.last_pass = None
         self.on_red = None
         self.fused = None
+        # calibrazione automatica camera <- ultrasuono: distanza camera x cam_k
+        self.cam_k, self.cal_n = 1.0, 0
+        self.cal = collections.deque(maxlen=40)
+        self.cal_t = None
+        self.cal_path = os.path.join(a.log_dir, "calibrazione.json")
+        if a.autocal and a.us_side == "B":
+            try:
+                with open(self.cal_path) as f:
+                    c = json.load(f)
+                if abs(c.get("scale", 1.0) - a.scale) < 1e-9 and c.get("model") == os.path.basename(a.model):
+                    self.cam_k, self.cal_n = clamp(float(c["k"]), 0.3, 3.0), int(c.get("n", 0))
+                    print(f"[calibrazione] camera x{self.cam_k:.2f} (da {self.cal_n} misure precedenti)")
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
 
     def update(self, dets, t):
         a = self.a
-        for tid, cls, x1, y1, x2, y2 in dets:
+        for det in dets:
+            tid, cls, x1, y1, x2, y2 = det[:6]
             if cls not in CLASSES or x2 - x1 < 3:
                 continue
             tr = self.tracks.get(tid)
             if tr is None:
                 tr = self.tracks[tid] = Track(tid, cls, t)
             tr.vote(cls)
+            tr.conf = det[6] if len(det) > 6 else None
             tr.bbox = (x1, y1, x2, y2)
             tr.last_t = t
             # un riquadro tagliato dal bordo non ha la larghezza vera: il veicolo ci sta passando di fianco
@@ -280,12 +345,15 @@ class Estimator:
             if not tr.edge:
                 w = x2 - x1
                 cx = (x1 + x2) / 2
+                # larghezza levigata: il bordo del riquadro trema di qualche pixel a ogni fotogramma
+                wf = math.exp(tr.lw.update(math.log(w), t))
                 sign = -1.0 if a.mirror else 1.0
                 # camera rivolta indietro: la destra dell'immagine è la SINISTRA del ciclista (positivo)
                 # laterale in "larghezze di veicolo": non dipende dalla focale
                 wm = tr.width_m * a.scale
-                tr.lat = sign * (cx - self.c0) * wm / w
-                tr.d = self.f * wm / w
+                tr.lat = sign * (cx - self.c0) * wm / wf
+                tr.d_raw = self.f * wm / wf
+                tr.d = tr.d_raw * self.cam_k
                 tr.min_d = min(tr.min_d, tr.d)
                 tr.hist.append((t, w, tr.lat))
             self._estimate(tr, t)
@@ -361,7 +429,31 @@ class Estimator:
                 self.on_red(t, tr)
         tr.max_level = max(tr.max_level, tr.level)
 
-    def zones(self, t, us_cm, cam_ok, us_v=None):
+    def calibrate(self, tr, us_ref, t):
+        """L'ultrasuono è preciso da vicino: quando vede lo stesso oggetto della camera, nello stesso
+        istante, il rapporto tra le due misure corregge la camera (focale e larghezza vera dell'oggetto)."""
+        a = self.a
+        if (not a.autocal or tr is None or tr.edge or tr.last_t != t or t == self.cal_t
+                or us_ref is None or not 3 <= us_ref <= a.us_trust + a.us_blend or not math.isfinite(tr.d_raw)):
+            return
+        self.cal_t = t
+        r = us_ref / (tr.d_raw * 100)
+        if not 0.33 < r < 3.0:  # troppo diversi: probabilmente non è lo stesso oggetto
+            return
+        self.cal.append(r)
+        self.cal_n += 1
+        if len(self.cal) >= 8:
+            self.cam_k = sorted(self.cal)[len(self.cal) // 2]
+            if self.cal_n % 20 == 0:
+                try:
+                    with open(self.cal_path, "w") as f:
+                        json.dump({"k": round(self.cam_k, 4), "n": self.cal_n, "scale": self.a.scale,
+                                   "model": os.path.basename(self.a.model)}, f)
+                except OSError:
+                    pass
+
+    def zones(self, t, us_cm, cam_ok, us_v=None, us_ref=None, lag=0.0):
+        """us_cm: ultima lettura; us_ref: lettura all'istante del fotogramma; lag: età del fotogramma (s)."""
         a = self.a
         z = {"L": 0, "B": 0, "R": 0}
         top = None
@@ -379,9 +471,13 @@ class Estimator:
             near_tr = min((tr for tr in self.tracks.values()
                            if cam_ok and tr.zone == "B" and t - tr.last_t <= a.stale),
                           key=lambda tr: tr.d, default=None)
+            self.calibrate(near_tr, us_ref, t)
             cam_cm = near_tr.d * 100 if near_tr else None
             # camera: v = d / TTC = d * d(ln larghezza)/dt
             cam_v = near_tr.d * 100 * near_tr.rate if near_tr and near_tr.rate is not None else None
+            if cam_cm is not None and cam_v is not None and lag > 0:
+                # il fotogramma ha già 'lag' secondi: portiamo la camera all'istante dell'ultrasuono
+                cam_cm = max(1.0, cam_cm - cam_v * min(lag, 0.5))
             if us_cm is not None and cam_cm is not None:
                 w_us = clamp((a.us_trust + a.us_blend - us_cm) / a.us_blend, 0.0, 1.0)
                 cm = w_us * us_cm + (1 - w_us) * cam_cm
@@ -402,7 +498,8 @@ class Estimator:
                               "cam_cm": fin(cam_cm, 0), "us_cm": fin(us_cm, 0),
                               "v_cms": fin(v, 1), "v_us": fin(us_v, 1), "v_cam": fin(cam_v, 1),
                               "kmh_real": fin(v * 0.036 / a.scale, 1) if v is not None else None,
-                              "ttc": fin(ttc, 1)}
+                              "ttc": fin(ttc, 1), "cam_k": round(self.cam_k, 3),
+                              "cam_raw_cm": fin(near_tr.d_raw * 100, 0) if near_tr else None}
                 near = 2 if cm < a.near_red else 1 if cm < a.near_amber else 0
         elif us_cm is not None:
             near = 2 if us_cm < a.near_red else 1 if us_cm < a.near_amber else 0
@@ -470,9 +567,16 @@ class Ultrasonic:
         slope, _ = linfit([p[0] for p in pts], [p[1] for p in pts])
         return -slope
 
+    def at(self, t):
+        """Lettura più vicina all'istante t (per confrontarla con un fotogramma della camera)."""
+        with self.lock:
+            pts = list(self.hist)
+        best = min(pts, key=lambda p: abs(p[0] - t), default=None)
+        return best[1] if best and abs(best[0] - t) <= 0.12 else None
+
     def feed(self, cm, t):
-        """cm=None: niente entro 4 m."""
-        self.buf.append(cm if cm is not None and cm < 395 else 9999.0)
+        """cm=None: niente entro la portata."""
+        self.buf.append(cm if cm is not None and cm < min(395.0, self.a.us_max) else 9999.0)
         val = sorted(self.buf)[len(self.buf) // 2]
         with self.lock:
             self.cm = None if val >= 9999 else val
@@ -512,17 +616,35 @@ class GpioUltrasonic(Ultrasonic):
             from gpiozero import DistanceSensor  # sudo apt install python3-gpiozero python3-lgpio
             self.sensor = DistanceSensor(echo=a.us_echo, trigger=a.us_trig, max_distance=4.0,
                                          queue_len=1, partial=True)
+            self.sensor.speed_of_sound = 331.3 + 0.606 * a.temp  # m/s, dipende dalla temperatura
         except Exception as e:
             print(f"[ultrasuono] GPIO non disponibili ({e}): continuo senza")
             return
-        print(f"[ultrasuono] GPIO TRIG={a.us_trig} ECHO={a.us_echo}")
+        # gpiozero fa partire gli impulsi da un suo thread e noi rileggeremmo spesso lo stesso valore:
+        # lo fermiamo e lanciamo noi un impulso alla volta, ognuno con l'ora esatta in cui parte
+        self.direct = False
+        try:
+            self.sensor._queue.stop()
+            self.direct = True
+        except Exception as e:
+            print(f"[ultrasuono] lettura diretta non disponibile ({e}): uso gpiozero normale")
+        print(f"[ultrasuono] GPIO TRIG={a.us_trig} ECHO={a.us_echo}, {a.us_hz:.0f} Hz, "
+              f"suono {self.sensor.speed_of_sound:.0f} m/s, {'diretta' if self.direct else 'gpiozero'}")
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
+        period = 1.0 / max(1.0, min(25.0, self.a.us_hz))  # sotto ~40 ms gli echi si sovrappongono
+        maxd = self.sensor.max_distance
         while True:
-            d = self.sensor.distance  # metri, 4.0 = niente
-            self.feed(None if d >= 3.95 else d * 100.0, time.time())
-            time.sleep(0.04)
+            t0 = time.time()
+            try:
+                v = self.sensor._read() if self.direct else self.sensor.distance / maxd
+            except Exception:
+                v = None
+            if v is not None:  # None = eco persa: si salta, non vuol dire "strada libera"
+                d = v * maxd
+                self.feed(None if d >= maxd - 0.05 else d * 100.0, t0)
+            time.sleep(max(0.005, period - (time.time() - t0)))
 
 
 class SerialUltrasonic(Ultrasonic):
@@ -727,26 +849,58 @@ class FakeScene:
 
 # ---------------------------------------------------------------- rilevamento
 
+def model_imgsz(path):
+    """Dimensione d'ingresso scritta da Ultralytics nel metadata.yaml del modello esportato."""
+    try:
+        import yaml
+        with open(os.path.join(path, "metadata.yaml")) as f:
+            v = yaml.safe_load(f).get("imgsz")
+        return v if isinstance(v, int) else list(v) if v and len(v) == 2 and v[0] != v[1] else (v[0] if v else None)
+    except (OSError, AttributeError, TypeError, ImportError):
+        return None
+
+
 class Detector:
     def __init__(self, a):
         from ultralytics import YOLO
         self.a = a
         path = a.model
+        if not os.path.isabs(path) and not os.path.exists(path) and os.path.exists(os.path.join(HERE, path)):
+            path = os.path.join(HERE, path)
         if not os.path.exists(path) and path.endswith("_ncnn_model"):
-            base = path[: -len("_ncnn_model")] + ".pt"
-            print(f"[modello] {path} non c'è: lo creo da {base} (serve internet la prima volta)")
-            path = YOLO(base).export(format="ncnn", imgsz=a.imgsz)
+            # yolo26n_192x480_ncnn_model -> esporta yolo26n.pt con ingresso 192x480 (alto x largo)
+            stem = os.path.basename(path)[: -len("_ncnn_model")]
+            base, _, size = stem.partition("_")
+            imgsz = parse_imgsz(size) if size else (parse_imgsz(a.imgsz) or 320)
+            print(f"[modello] {path} non c'è: lo creo da {base}.pt a {imgsz} (serve internet la prima volta)")
+            out = YOLO(base + ".pt").export(format="ncnn", imgsz=imgsz)
+            if os.path.abspath(out) != os.path.abspath(path):
+                shutil.move(out, path)
+        self.imgsz = parse_imgsz(a.imgsz) or model_imgsz(path) or 320
+        self.name = os.path.basename(path.rstrip("/"))
         self.model = YOLO(path, task="detect")
+        # ByteTrack ha bisogno anche dei riquadri poco sicuri (0.1-0.25) per non perdere la traccia
+        # quando il veicolo è sfocato o coperto: --conf decide solo quando un riquadro "conta"
+        kind = "botsort" if "botsort" in a.tracker else "bytetrack"
+        self.tracker = os.path.join(a.log_dir, "tracker.yaml")
+        with open(self.tracker, "w") as f:
+            f.write(f"tracker_type: {kind}\ntrack_high_thresh: {a.conf}\ntrack_low_thresh: 0.1\n"
+                    f"new_track_thresh: {a.conf + 0.05}\ntrack_buffer: 30\nmatch_thresh: 0.8\nfuse_score: True\n")
+            if kind == "botsort":
+                f.write("gmc_method: sparseOptFlow\nproximity_thresh: 0.5\nappearance_thresh: 0.8\n"
+                        "with_reid: False\nmodel: auto\n")
+        print(f"[modello] {self.name}, ingresso {self.imgsz}, tracker {kind}")
 
     def detect(self, frame, roi):
         x0, y0, x1, y1 = roi
-        r = self.model.track(frame[y0:y1, x0:x1], persist=True, tracker=self.a.tracker, imgsz=self.a.imgsz,
-                             conf=self.a.conf, classes=list(CLASSES), verbose=False)[0]
+        r = self.model.track(frame[y0:y1, x0:x1], persist=True, tracker=self.tracker, imgsz=self.imgsz,
+                             conf=0.1, classes=list(CLASSES), verbose=False)[0]
         b = r.boxes
         if b is None or b.id is None:
             return []
-        return [(tid, c, bx1 + x0, by1 + y0, bx2 + x0, by2 + y0)
-                for (bx1, by1, bx2, by2), tid, c in zip(b.xyxy.tolist(), b.id.int().tolist(), b.cls.int().tolist())]
+        return [(tid, c, bx1 + x0, by1 + y0, bx2 + x0, by2 + y0, round(p, 2))
+                for (bx1, by1, bx2, by2), tid, c, p in zip(b.xyxy.tolist(), b.id.int().tolist(),
+                                                           b.cls.int().tolist(), b.conf.tolist())]
 
 
 # ---------------------------------------------------------------- video annotato e clip
@@ -766,8 +920,14 @@ def draw(frame, est, roi, zones, fps, t):
         c = LEVEL_BGR[tr.level]
         cv2.rectangle(img, (x1, y1), (x2, y2), c, 3 if tr.level else 1)
         ttc = f"{tr.ttc:.1f}s" if tr.ttc < INF else "-"
-        lab = f"{tr.name} {tr.d:.0f}m TTC {ttc} sorpasso {tr.clear:.1f}m"
-        cv2.putText(img, lab, (x1, max(15, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 2)
+        conf = f" {tr.conf:.0%}" if tr.conf is not None else ""
+        lab = f"{tr.name}{conf} {fmt_d(tr.d)} TTC {ttc}"
+        if est.a.us_side != "B":
+            lab += f" sorpasso {fmt_d(tr.clear)}"
+        (tw, th), _ = cv2.getTextSize(lab, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        ty = max(th + 8, y1 - 6)
+        cv2.rectangle(img, (x1, ty - th - 6), (x1 + tw + 6, ty + 4), (0, 0, 0), -1)
+        cv2.putText(img, lab, (x1 + 3, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, c, 2)
     # vista camera: la sinistra del ciclista è a DESTRA nell'immagine
     names = [("DX", zones["R"]), ("DIETRO", zones["B"]), ("SX", zones["L"])]
     for i, (n, lvl) in enumerate(names):
@@ -775,6 +935,13 @@ def draw(frame, est, roi, zones, fps, t):
         cv2.rectangle(img, (x, 10), (x + 120, 40), LEVEL_BGR[lvl] if lvl else (60, 60, 60), -1)
         cv2.putText(img, n, (x + 8, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     cv2.putText(img, f"{fps:.1f} fps", (W - 120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    F = est.fused
+    if F:  # riga in basso: le tre distanze, per il video della demo
+        cm = lambda v: "-" if v is None else f"{v:.0f} cm"
+        txt = (f"ultrasuono {cm(F['us_cm'])}   camera {cm(F['cam_cm'])}   FUSIONE {cm(F['cm'])}"
+               f"   (camera x{F['cam_k']:.2f})")
+        cv2.rectangle(img, (0, H - 34), (W, H), (0, 0, 0), -1)
+        cv2.putText(img, txt, (10, H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     return img
 
 
@@ -964,6 +1131,7 @@ def main():
     else:
         us = None
     print(f"[avvio] {mode}, {W}x{H}, focale {est.f:.0f} px, ultrasuono {'sì' if us else 'no'}")
+    live = mode != "video"  # orologio dei fotogrammi = orologio dell'ultrasuono
 
     need_frames = cv2 is not None and (a.save or a.clips or a.stream or a.show)
     clips = Clips(os.path.join(a.log_dir, "clip")) if a.clips and cv2 is not None else None
@@ -1006,11 +1174,14 @@ def main():
                 if a.us_side != "B":  # puntato indietro non vede i sorpassi, solo chi ti segue
                     est.on_pass(t_scene, cm, dur, t_start if mode != "video" else None)
 
-            zones, top, near = est.zones(t_scene, us_cm, cam_ok, us.speed() if us else None)
+            us_ref = (us.at(t_scene) if live else us_cm) if us else None
+            lag = clamp(now - t_scene, 0.0, 0.5) if live else 0.0
+            zones, top, near = est.zones(t_scene, us_cm, cam_ok, us.speed() if us else None, us_ref, lag)
             seq = (seq + 1) % 100000
             ttc_ds = int(clamp(top.ttc * 10, 0, 998)) if top and top.ttc < INF else 999
             tracks = [{
-                "id": tr.id, "cls": tr.name, "d": fin(tr.d, 1), "lat": fin(tr.lat), "lat_pass": fin(tr.lat_pass),
+                "id": tr.id, "cls": tr.name, "d": fin(tr.d, 3), "d_raw": fin(tr.d_raw, 3), "conf": tr.conf,
+                "lat": fin(tr.lat), "lat_pass": fin(tr.lat_pass),
                 "ttc": fin(tr.ttc, 1), "clear": fin(tr.clear), "level": tr.level, "zone": tr.zone,
                 "edge": tr.edge, "w": tr.width_m, "len": tr.length_m,
             } for tr in est.tracks.values() if t_scene - tr.last_t <= a.stale]
@@ -1020,6 +1191,8 @@ def main():
             state = {
                 "t": now, "mode": mode, "fps": round(fps, 1), "lat_ms": round(lat_ms), "cam_ok": cam_ok,
                 "zones": zones, "near": near, "us_cm": fin(us_cm, 0), "us_side": a.us_side, "has_us": us is not None,
+                "model": det.name if det else None, "imgsz": det.imgsz if det else None,
+                "cal": {"k": round(est.cam_k, 3), "n": est.cal_n, "on": a.autocal and a.us_side == "B"},
                 "fused": est.fused, "us_trust": a.us_trust, "us_blend": a.us_blend, "scale": a.scale,
                 "near_red": a.near_red, "near_amber": a.near_amber,
                 "us_age": fin(now - us.t, 2) if us and us.t else None, "us_src": type(us).__name__ if us else None,

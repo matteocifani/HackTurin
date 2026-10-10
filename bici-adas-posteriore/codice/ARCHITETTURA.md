@@ -2,8 +2,22 @@
 
 *"Guardaspalle" è solo un nome di lavoro. Aggiornato sab 10 ottobre, ore 13, con la divisione decisa dal team: Raspberry sulla bici come cuore, Arduino UNO Q sul casco.*
 
+*Aggiornato sab 10 ottobre, ore 22: su consiglio di un mentor la PoC è pensata come ADAS aggiungibile a qualsiasi mezzo, non solo alle bici. Vedi "Posizionamento".*
+
 ## In una frase
-Un ADAS per bici che guarda dietro di te, capisce cosa arriva e come ti passerà, e avvisa solo quando conta. Il ciclista viene avvisato con luci ai lati degli occhi e un suono; l'automobilista con la luce sul casco. Quando ti giri a guardare, il casco ti risponde.
+Un ADAS posteriore che si aggiunge a qualsiasi mezzo che non ce l'ha: guarda dietro, capisce cosa arriva e come ti passerà, e avvisa solo quando conta. La PoC è su una bici: il ciclista viene avvisato con luci ai lati degli occhi e un suono, l'automobilista con la luce sul casco, e quando ti giri a guardare il casco ti risponde.
+
+## Posizionamento: un ADAS retrofit, la bici è il primo mezzo
+- **Il problema è più grande della bici.** In Italia circolano milioni di auto, furgoni, camion e autobus immatricolati prima che gli ADAS diventassero obbligatori (in UE dal luglio 2022 sui modelli nuovi, dal 2024 su tutte le nuove immatricolazioni): niente angolo cieco, niente avviso di tamponamento, niente sensori evoluti in retromarcia. Bici e monopattini non li hanno mai avuti.
+- **La stessa scatola su tutti:** camera + ultrasuono + computer economico, montati dietro. Il software non cambia: si sceglie il mezzo con `--mezzo` (`perception/profili_mezzo.py`) e cambiano solo quattro cose:
+  1. **quanto sei largo**: decide quando un veicolo è "in linea" con te;
+  2. **la distanza di sorpasso sicura**: 1,5 m per la bici, di più per i mezzi larghi;
+  3. **la finestra di urgenza**: un camion ha bisogno di più preavviso;
+  4. **chi pesa di più nel rischio**: sulla bici fa paura il camion, sul camion fa paura la bici nell'angolo cieco.
+- **Perché funziona su tutti senza ricalibrare:** il tempo all'impatto si ricava dalla crescita del riquadro e la distanza laterale in "larghezze d'auto". Nessuna delle due dipende dal mezzo o dall'ottica.
+- **Cosa cambia nell'avviso:** bici e monopattino hanno il casco. Gli altri mezzi hanno un'unità in cabina: la stessa UNO Q, con la strip divisa in LED sugli specchietti (sinistra e destra) e sul cruscotto (dietro), buzzer e la stessa pagina web su un tablet.
+- **Perché partiamo dalla bici:** è il caso più difficile (spazio, batteria, vibrazioni, nessuno schermo) e quello con il dato più forte (morti in bici +23%). Se sta su una bici, sta su un furgone.
+- **Cosa diciamo con onestà:** sui mezzi a motore è provato in simulazione e in scala; per un camion vero servono più camere, a partire dal fianco destro.
 
 ## Come raccontarlo (non solo il metro e mezzo)
 Tre livelli, come l'ADAS di un'auto:
@@ -201,6 +215,8 @@ Per 4 persone; se siete in 3, unite i ruoli 3 e 4.
 - **1:50–2:00:** mappa dei sorpassi a Torino e prossimi passi.
 
 ## 9. Pitch (30 secondi)
+*Variante da usare se la giuria apprezza il retrofit:* chiudete con "La bici è il primo mezzo. La stessa scatola, con un parametro diverso, va su un furgone, su un camion o sull'auto di dieci anni fa che l'ADAS non ce l'ha."
+
 > Nel 2025 in Italia i morti in strada sono diminuiti, ma quelli in bici sono aumentati del 23%. Il pericolo arriva da dietro, dove il ciclista non vede. I radar per bici esistono, ma suonano per ogni auto, e dopo dieci minuti non li ascolti più. Guardaspalle guarda dietro di te con un'intelligenza artificiale che gira tutta a bordo. Capisce se arriva un camion o una bici, tra quanti secondi, e quanto vicino ti passerà, e avvisa solo quando conta: con due luci ai lati degli occhi, senza schermi. Quando ti giri a guardare, il casco ti risponde: verde, puoi andare; rosso, aspetta. Avvisa anche chi guida. E ogni sorpasso pericoloso diventa un dato per rendere più sicure le strade di Torino.
 
 ## 10. Domande probabili della giuria
@@ -212,6 +228,7 @@ Per 4 persone; se siete in 3, unite i ruoli 3 e 4.
 - **"Quanto vede lontano?"** Rispondete con il numero misurato, circa 20–30 m. A 30 km/h di differenza di velocità sono circa 3 secondi di preavviso, abbastanza per non spostarsi.
 - **"Non distrae?"** Lo schermo non serve. Le tempie stanno nella visione periferica e il suono c'è solo per il rosso.
 - **"Privacy?"** Nessuna registrazione continua: solo clip brevi degli eventi rossi, a bassa risoluzione, che restano a bordo.
+- **"Perché solo le bici?"** Non solo: è un ADAS retrofit. La percezione è la stessa, cambia il profilo del mezzo (`--mezzo auto`, `camion`, `bus`). Mostrate `--fake --mezzo camion` sulla pagina: il camion disegnato, i pesi invertiti (la bici nell'angolo cieco diventa il pericolo).
 - **"Quanto costa?"** Sono circa 150 € di componenti da hobbista. Un prodotto userebbe una scheda sola.
 
 ## 11. Consegna
@@ -220,6 +237,7 @@ Per 4 persone; se siete in 3, unite i ruoli 3 e 4.
 - **Privacy nei materiali:** sfocate targhe e volti nei video pubblicati.
 
 ## 12. Roadmap
+- retrofit su mezzi a motore: unità in cabina, più camere (angolo cieco destro dei camion), taratura dei profili su strada, flotte (bus urbani, furgoni delle consegne);
 - tre sensori (sinistra, dietro, destra): il codice ha già tre zone;
 - radar mmWave per la notte e per vedere più lontano;
 - scheda unica con acceleratore AI;

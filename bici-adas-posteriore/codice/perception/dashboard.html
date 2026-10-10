@@ -159,7 +159,8 @@ function updateUi(now) {
     const c = S.counts, h = S.helmet;
     $("foot").innerHTML = [
       `<b>${S.fps}</b> fps`, `<b>${S.lat_ms}</b> ms`, S.mode,
-      `casco <b>${h.ok ? "✓" : "✗"}</b>`,
+      `${S.mezzo ? S.mezzo.nome.toLowerCase() : "bici"}`,
+      haHelmet() ? `casco <b>${h.ok ? "✓" : "✗"}</b>` : "",
       S.has_us ? `ultrasuono <b>${S.us_cm != null ? (S.us_cm / 100).toFixed(2) + " m" : "libero"}</b>` : "ultrasuono —",
       `avvisi rossi <b>${c.rossi}</b> · radar <b>${c.radar}</b>`,
       `sorpassi <b>${c.sorpassi}</b> (stretti ${c.sorpassi_stretti})`,
@@ -178,6 +179,12 @@ function beep(freq) {
   g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.12);
   o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.13);
 }
+
+// ---------------------------------------------------------------- il mezzo (bici, monopattino, auto, furgone, camion, bus)
+// senza "mezzo" nello stato (versione vecchia di bike_adas.py) si comporta come la bici
+const isTwoWheel = () => !S || !S.mezzo || S.mezzo.uscita === "casco";
+const haHelmet = isTwoWheel;
+const egoHalf = () => (S && S.rider_half != null ? S.rider_half : 0.35);
 
 // ---------------------------------------------------------------- vista dall'alto
 const cv = $("cv"), ctx = cv.getContext("2d");
@@ -215,17 +222,18 @@ function frame(now) {
 
   // strada: bordo destro, linea di mezzeria tratteggiata che scorre
   ctx.strokeStyle = "#566273"; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(g.x(-0.8), 0); ctx.lineTo(g.x(-0.8), H); ctx.stroke();
+  const rh = egoHalf(), edge = -(rh + 0.45), mid = rh + 2.35;  // bici: bordo a 0,8 m, mezzeria a 2,7 m
+  ctx.beginPath(); ctx.moveTo(g.x(edge), 0); ctx.lineTo(g.x(edge), H); ctx.stroke();
   ctx.strokeStyle = "#c9d2dc"; ctx.lineWidth = 3; ctx.setLineDash([22, 22]);
   ctx.lineDashOffset = -((now / 1000) * 60 % 44);
-  ctx.beginPath(); ctx.moveTo(g.x(2.7), 0); ctx.lineTo(g.x(2.7), H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(g.x(mid), 0); ctx.lineTo(g.x(mid), H); ctx.stroke();
   ctx.setLineDash([]);
 
-  // bolla di sicurezza attorno alla bici (fino alla distanza di sorpasso sicura a sinistra)
+  // bolla di sicurezza attorno al mezzo (fino alla distanza di sorpasso sicura a sinistra)
   const zL = S && now - lastOk < 1500 ? S.zones.L : 0;
   const safe = S ? S.pass_safe : 1.5;
   ctx.fillStyle = zL === 2 ? "rgba(255,59,59,.18)" : zL === 1 ? "rgba(255,176,32,.12)" : "rgba(47,210,122,.08)";
-  roundRect(g.x(safe), g.bikeY - 26, (safe + 0.45) * g.pxm, 120, 18); ctx.fill();
+  roundRect(g.x(safe), g.bikeY - 26, (safe + rh + 0.1) * g.pxm, 120, 18); ctx.fill();
 
   // ultrasuono: distanza misurata ora
   if (S && S.us_cm != null) {
@@ -261,6 +269,8 @@ function frame(now) {
     drawVehicle(g, o);
   }
 
+  if (!isTwoWheel()) { drawEgo(g); requestAnimationFrame(frame); return; }
+
   // la bici
   ctx.save(); ctx.translate(g.cx, g.bikeY);
   ctx.strokeStyle = "#fff"; ctx.fillStyle = "#fff"; ctx.lineCap = "round";
@@ -271,6 +281,18 @@ function frame(now) {
   ctx.restore();
 
   requestAnimationFrame(frame);
+}
+
+// auto, furgone, camion o bus visti dall'alto: il retro è dove sta la camera, il muso esce dallo schermo
+function drawEgo(g) {
+  const w = 2 * egoHalf() * g.pxm, back = g.bikeY + 26, h = Math.min(S.mezzo.lunghezza * g.pxm * 0.5, back);
+  ctx.fillStyle = "#e9eef4"; ctx.strokeStyle = "#2fd27a"; ctx.lineWidth = 3;
+  roundRect(g.cx - w / 2, back - h, w, h, Math.min(10, w / 6)); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ff3b3b";  // fanali posteriori
+  ctx.fillRect(g.cx - w / 2 + 3, back - 6, w * 0.18, 4); ctx.fillRect(g.cx + w / 2 - 3 - w * 0.18, back - 6, w * 0.18, 4);
+  ctx.fillStyle = "#151c25"; ctx.font = "700 13px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(S.mezzo.nome.toUpperCase(), g.cx, back - Math.min(h / 2, 24));
+  ctx.textBaseline = "alphabetic";
 }
 
 function drawVehicle(g, o) {

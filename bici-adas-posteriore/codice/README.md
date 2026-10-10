@@ -1,8 +1,10 @@
-# Guardaspalle: ADAS per bici
+# Guardaspalle: ADAS posteriore da aggiungere a qualsiasi mezzo
 
 *Prototipo per hackTurin 2026. "Guardaspalle" è un nome di lavoro.*
 
-Guardaspalle guarda la strada dietro al ciclista con un'AI che gira tutta a bordo. Capisce **cosa** arriva, **tra quanti secondi** e **quanto vicino passerà**, e avvisa solo quando conta:
+Guardaspalle è un ADAS posteriore **retrofit**: una scatola con camera, ultrasuono e un computer da pochi euro che si monta dietro a un mezzo che l'ADAS non ce l'ha. Bici e monopattini per primi, ma lo stesso codice funziona su **auto vecchie, furgoni, camion e autobus**: si sceglie il mezzo con `--mezzo` e cambiano solo larghezza, soglie e pesi (vedi [Su qualsiasi mezzo](#su-qualsiasi-mezzo)). La PoC dell'hackathon è montata su una bici, con il casco smart che esiste solo per le due ruote.
+
+Guardaspalle guarda la strada dietro al mezzo con un'AI che gira tutta a bordo. Capisce **cosa** arriva, **tra quanti secondi** e **quanto vicino passerà**, e avvisa solo quando conta:
 - **al ciclista** con LED in visione periferica sul casco e un suono, senza bisogno di guardare uno schermo;
 - **all'automobilista** con la luce posteriore del casco, che lampeggia solo quando un'auto arriva troppo veloce o troppo stretta.
 
@@ -21,7 +23,8 @@ Quando il ciclista gira la testa per guardare indietro, il casco risponde: verde
 | Percorso | Cosa fa |
 |---|---|
 | `perception/bike_adas.py` | Il cuore, sul Pi: webcam, YOLO, tracking, tempo all'impatto, rischio, ultrasuono, server web, registro eventi |
-| `perception/dashboard.html` | Vista dall'alto "stile Tesla" per il telefono sul manubrio |
+| `perception/profili_mezzo.py` | Profili per tipo di mezzo (`--mezzo bici`, `monopattino`, `auto`, `furgone`, `camion`, `bus`) |
+| `perception/dashboard.html` | Vista dall'alto "stile Tesla" per il telefono sul manubrio o lo schermo in cabina; disegna il mezzo scelto |
 | `helmet_unoq/sketch/sketch.ino` | STM32 del casco: LED, buzzer, testa girata, caduta, pulsante, modalità degradata |
 | `helmet_unoq/python/main.py` | Linux del casco (App Lab): legge il rischio dal Pi, manda gli eventi, SOS su Telegram |
 | `ARCHITETTURA.md` | Scelte di progetto, piano, demo, pitch |
@@ -33,6 +36,25 @@ python3 perception/bike_adas.py --fake
 # apri http://localhost:8000 (dal telefono: http://<ip-del-pc>:8000)
 ```
 `--fake` genera traffico simulato e un ultrasuono simulato. Serve a lavorare su casco e pagina mentre la percezione è ancora in sviluppo.
+
+## Su qualsiasi mezzo
+La percezione è la stessa per tutti: tempo all'impatto dalla crescita del riquadro (non serve calibrare la camera), traiettoria laterale, distanza esatta dall'ultrasuono negli ultimi metri. Cambia solo **chi stai proteggendo** e **quanto sei largo**:
+
+| `--mezzo` | Avviso | Mezza larghezza | Sorpasso sicuro (dall'asse) | Urgenza (TTC) | Ultrasuono rosso / ambra | Chi pesa di più nel rischio |
+|---|---|---|---|---|---|---|
+| `bici` (default) | casco | 0,35 m | 1,5 m | 6 → 1,5 s | 150 / 250 cm | bus e camion |
+| `monopattino` | casco | 0,30 m | 1,5 m | 6 → 1,5 s | 150 / 250 cm | bus e camion |
+| `auto` | cabina | 0,90 m | 1,9 m | 4 → 1,2 s | 60 / 150 cm | moto e mezzi pesanti nell'angolo cieco |
+| `furgone` | cabina | 1,00 m | 2,0 m | 4,5 → 1,3 s | 80 / 200 cm | moto, bici |
+| `camion`, `bus` | cabina | 1,25 m | 2,3 m | 5 → 1,5 s | 100 / 250 cm | **bici e pedoni**, il caso mortale tipico dei mezzi pesanti |
+
+```bash
+python3 perception/bike_adas.py --fake --mezzo camion     # prova senza hardware
+```
+- Ogni flag scritto a mano vince sul profilo (es. `--mezzo auto --pass-safe 2.2`).
+- **Cosa fa su un mezzo a motore:** avvisa di chi arriva veloce in linea (tamponamento), di chi è nell'angolo cieco quando cambi corsia (zone SX e DX), e in retromarcia l'ultrasuono fa da sensore di parcheggio che sa *cosa* c'è dietro (un pedone pesa più di un cassonetto).
+- **Dove arriva l'avviso:** su bici e monopattino nel casco; sugli altri mezzi in un'**unità in cabina**: lo stesso sketch del casco sulla UNO Q (caduta e testa girata lì non servono), con la strip divisa in LED sugli specchietti (SX e DX) e sul cruscotto (dietro), più buzzer e la pagina web su un tablet o sullo schermo dell'auto.
+- I valori dei mezzi a motore sono ragionevoli ma **non tarati su strada**: sono il punto di partenza.
 
 ## Raspberry Pi 4 (bici)
 Serve una microSD o una chiavetta da **almeno 16 GB**: Pi OS, PyTorch, OpenCV e YOLO non stanno in 2 GB. Sul portatile lo stesso codice gira con `pip install ultralytics` e `--source 0`, senza l'ultrasuono.
@@ -150,6 +172,7 @@ Aprite `http://<ip-del-pi>:8000` e toccate lo schermo: si attivano il suono e lo
 - La camera vede circa 20–30 m: il preavviso è di qualche secondo, non quello di un radar.
 - La distanza da una sola camera ha un errore di circa il 15%: le decisioni usano tempo all'impatto e distanza laterale, che non ne dipendono.
 - Un solo sensore laterale: il codice gestisce già 3 zone.
+- Sui mezzi a motore è provato solo in simulazione (`--fake --mezzo ...`) e in scala. Un camion vero vuole più camere (dietro e sul fianco destro per l'angolo cieco): oggi il codice ne legge una.
 
 ## Privacy
 Nessuna registrazione continua. Con `--clips` vengono salvati solo 5 s a bassa risoluzione per ogni avviso rosso, e restano a bordo.
