@@ -6,7 +6,7 @@ Pi√π persone possono lavorare in parallelo su prompt diversi (P1, P2, P3) purch√
 Primo avvio del repository (PowerShell, una volta sola, da chi crea il repo):
 
 ```powershell
-cd "C:\Users\39334\Documents\Hackaton\HackTurin 2026\casco-sentinella"
+cd "C:\Users\39334\Documents\Hackaton\HackTurin 2026\HackTurin\casco-sentinella"
 git init
 git add .
 git commit -m "Spec iniziale Casco Sentinella"

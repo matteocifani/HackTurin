@@ -3,7 +3,7 @@
 Tutti i comandi in **PowerShell**, dalla cartella `casco-sentinella`. Non serve attivare il venv: si usa direttamente `.\.venv\Scripts\python.exe`.
 
 ```powershell
-cd "C:\Users\39334\Documents\Hackaton\HackTurin 2026\casco-sentinella"
+cd "C:\Users\39334\Documents\Hackaton\HackTurin 2026\HackTurin\casco-sentinella"
 
 # 1. Una volta sola: ambiente Python e dipendenze
 py -3 -m venv .venv
