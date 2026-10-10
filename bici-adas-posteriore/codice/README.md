@@ -67,6 +67,11 @@ Serve una microSD o una chiavetta da **almeno 16 GB**: Pi OS, PyTorch, OpenCV e 
    # sulla bici
    python3 perception/bike_adas.py --source 0 --us-trig 23 --us-echo 24 --clips --save giro.mp4
    ```
+   **Camera e ultrasuono puntati entrambi indietro** (`--us-side B`): la distanza di chi ti segue è una fusione. Sotto `--us-trust` (40 cm) vale l'ultrasuono, sopra `--us-trust` + `--us-blend` (60 cm) vale la camera, in mezzo una media pesata; se vede uno solo dei due vale quello. La pagina `/test` mostra camera, ultrasuono e fusione affiancati.
+   **Demo sul tavolo con una macchinina:** `--scale 0.05` (modellino 1:20, la camera stima la distanza in cm veri) e soglie in scala, ad esempio `--near-red 15 --near-amber 30`:
+   ```bash
+   python3 perception/bike_adas.py --source 0 --us-trig 23 --us-echo 24 --us-side B --scale 0.05 --near-red 15 --near-amber 30 --clips --stream
+   ```
    All'uscita (Ctrl+C) stampa e salva in `logs/` un riassunto con fps, avvisi rossi contro avvisi "da radar", sorpassi misurati ed errore medio tra distanza prevista e misurata.
 
 ### Calibrazione (10 minuti in parcheggio)

@@ -98,6 +98,11 @@ def parse_args():
     g.add_argument("--near-red", type=float, default=150.0, help="cm: rosso se un veicolo è di fianco più vicino")
     g.add_argument("--near-amber", type=float, default=250.0)
     g.add_argument("--pass-start", type=float, default=300.0, help="cm: sotto questa soglia inizia un sorpasso")
+    g.add_argument("--us-trust", type=float, default=40.0,
+                   help="cm: con --us-side B, sotto questa distanza vale l'ultrasuono, sopra la camera")
+    g.add_argument("--us-blend", type=float, default=20.0, help="cm di passaggio graduale tra ultrasuono e camera")
+    g.add_argument("--scale", type=float, default=1.0,
+                   help="scala dei veicoli per la demo in miniatura (es. 0.05 = macchinina 1:20)")
     g = p.add_argument_group("uscite")
     g.add_argument("--port", type=int, default=8000)
     g.add_argument("--log-dir", default=os.path.join(HERE, "logs"))
@@ -255,6 +260,7 @@ class Estimator:
         self.ratios, self.errors = [], []  # per la calibrazione e per il numero da mostrare
         self.last_pass = None
         self.on_red = None
+        self.fused = None
 
     def update(self, dets, t):
         a = self.a
@@ -277,8 +283,9 @@ class Estimator:
                 sign = -1.0 if a.mirror else 1.0
                 # camera rivolta indietro: la destra dell'immagine è la SINISTRA del ciclista (positivo)
                 # laterale in "larghezze di veicolo": non dipende dalla focale
-                tr.lat = sign * (cx - self.c0) * tr.width_m / w
-                tr.d = self.f * tr.width_m / w
+                wm = tr.width_m * a.scale
+                tr.lat = sign * (cx - self.c0) * wm / w
+                tr.d = self.f * wm / w
                 tr.min_d = min(tr.min_d, tr.d)
                 tr.hist.append((t, w, tr.lat))
             self._estimate(tr, t)
@@ -366,7 +373,26 @@ class Estimator:
                 if tr.level and (top is None or tr.score > top.score):
                     top = tr
         near = 0
-        if us_cm is not None:
+        self.fused = None
+        if a.us_side == "B":
+            # stessa direzione: da vicino vale l'ultrasuono (preciso), da lontano la camera
+            cam = min((tr.d for tr in self.tracks.values()
+                       if cam_ok and tr.zone == "B" and t - tr.last_t <= a.stale), default=None)
+            cam_cm = cam * 100 if cam is not None else None
+            if us_cm is not None and cam_cm is not None:
+                w_us = clamp((a.us_trust + a.us_blend - us_cm) / a.us_blend, 0.0, 1.0)
+                cm = w_us * us_cm + (1 - w_us) * cam_cm
+            elif us_cm is not None:
+                w_us, cm = 1.0, us_cm
+            elif cam_cm is not None:
+                w_us, cm = 0.0, cam_cm
+            else:
+                w_us, cm = None, None
+            if cm is not None:
+                self.fused = {"cm": round(cm), "w_us": round(w_us, 2),
+                              "cam_cm": fin(cam_cm, 0), "us_cm": fin(us_cm, 0)}
+                near = 2 if cm < a.near_red else 1 if cm < a.near_amber else 0
+        elif us_cm is not None:
             near = 2 if us_cm < a.near_red else 1 if us_cm < a.near_amber else 0
         z[a.us_side] = max(z[a.us_side], near)
         return z, top, near
@@ -971,6 +997,8 @@ def main():
             state = {
                 "t": now, "mode": mode, "fps": round(fps, 1), "lat_ms": round(lat_ms), "cam_ok": cam_ok,
                 "zones": zones, "near": near, "us_cm": fin(us_cm, 0), "us_side": a.us_side, "has_us": us is not None,
+                "fused": est.fused, "us_trust": a.us_trust, "us_blend": a.us_blend, "scale": a.scale,
+                "near_red": a.near_red, "near_amber": a.near_amber,
                 "us_age": fin(now - us.t, 2) if us and us.t else None, "us_src": type(us).__name__ if us else None,
                 "top": {"cls": top.name, "ttc": fin(top.ttc, 1), "zone": top.zone, "level": top.level} if top else None,
                 "tracks": tracks, "counts": dict(est.counts), "last_pass": est.last_pass,
