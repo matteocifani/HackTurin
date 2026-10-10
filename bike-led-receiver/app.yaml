@@ -1,0 +1,3 @@
+name: Bike LED receiver
+icon: 🚲
+description: Receives detections over UDP from the Raspberry Pi and shows class (colour) and side on the helmet LED strip.
