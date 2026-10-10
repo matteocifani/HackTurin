@@ -1,0 +1,98 @@
+[
+  {
+    "id": "regina_montebello_tarino",
+    "name": "Corso Regina Margherita (controviale tra via Montebello e via Tarino)",
+    "kind": "intersection",
+    "pairs": [
+      [
+        "Corso Regina Margherita",
+        "Via Montebello"
+      ],
+      [
+        "Corso Regina Margherita",
+        "Via Tarino"
+      ]
+    ],
+    "why": "Strada con più incidenti nel 2024 secondo la Polizia Locale (dato provvisorio, Clean Cities)"
+  },
+  {
+    "id": "piazza_rivoli",
+    "name": "Piazza Rivoli",
+    "kind": "place",
+    "query": "Piazza Rivoli, Torino",
+    "why": "Ciclisti investiti, più incidenti ravvicinati (Giornale La Voce)"
+  },
+  {
+    "id": "regina_potenza_lecce",
+    "name": "Corso Regina Margherita / corso Potenza / corso Lecce",
+    "kind": "intersection",
+    "pairs": [
+      [
+        "Corso Regina Margherita",
+        "Corso Potenza"
+      ],
+      [
+        "Corso Regina Margherita",
+        "Corso Lecce"
+      ]
+    ],
+    "why": "Incrocio critico citato dalla stampa"
+  },
+  {
+    "id": "peschiera_trapani",
+    "name": "Corso Peschiera / corso Trapani",
+    "kind": "intersection",
+    "pairs": [
+      [
+        "Corso Peschiera",
+        "Corso Trapani"
+      ]
+    ],
+    "why": "Incrocio critico citato dalla stampa"
+  },
+  {
+    "id": "giambone_corsica",
+    "name": "Corso Giambone / corso Corsica",
+    "kind": "intersection",
+    "pairs": [
+      [
+        "Corso Giambone",
+        "Corso Corsica"
+      ]
+    ],
+    "why": "Incrocio critico citato dalla stampa"
+  },
+  {
+    "id": "via_nizza",
+    "name": "Via Nizza",
+    "kind": "place",
+    "query": "Via Nizza, Torino",
+    "why": "Asse citato dalla stampa (strada lunga: il punto è solo indicativo)"
+  },
+  {
+    "id": "po_vittorio_veneto",
+    "name": "Via Po / piazza Vittorio Veneto",
+    "kind": "intersection",
+    "pairs": [
+      [
+        "Via Po",
+        "Piazza Vittorio Veneto"
+      ]
+    ],
+    "why": "Zona critica citata dalla stampa"
+  },
+  {
+    "id": "san_salvario",
+    "name": "San Salvario",
+    "kind": "place",
+    "query": "San Salvario, Torino",
+    "why": "Quartiere citato dalla stampa (punto = centro del quartiere)"
+  },
+  {
+    "id": "vanchiglia",
+    "name": "Vanchiglia",
+    "kind": "place",
+    "query": "Vanchiglia, Torino",
+    "why": "Quartiere citato dalla stampa (punto = centro del quartiere)"
+  }
+]

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Casco Sentinella — 112 SIMULATO</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="emergenza" class="emergenza">
+  <div class="sim-banner">Demo HackTurin — include dati storici SIMULATI</div>
+  <div class="em-fixed">SIMULAZIONE — nessuna chiamata reale al 112</div>
+  <main class="em-main">
+    <h1>Centrale operativa (simulata) — allarmi automatici dal casco</h1>
+    <p class="em-status"><span id="live" class="live">connessione…</span></p>
+    <p><button id="audioBtn" class="primary">Attiva audio</button>
+      <span class="em-status">Il browser riproduce suoni solo dopo un clic: premilo prima della demo.</span></p>
+    <p class="em-status">Modello di riferimento: pacchetto dati minimo (MSD) dell'eCall delle auto, Reg. UE 2015/758.
+      Si attiva solo quando il casco ha rilevato una caduta, la persona è rimasta immobile e l'allarme non è stato annullato.</p>
+    <h2>Ultime emergenze</h2>
+    <div id="list" class="em-list"></div>
+  </main>
+  <div id="overlay" class="em-overlay"><div id="card" class="em-card"></div></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

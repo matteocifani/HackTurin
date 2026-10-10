@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Casco Sentinella — Mappa pubblica</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="public">
+  <div class="sim-banner">Demo HackTurin — include dati storici SIMULATI (luoghi reali, distribuzione inventata)</div>
+  <header class="top">
+    <h1>Casco Sentinella · Mappa aperta di Torino</h1>
+    <nav><a class="active" href="/">Mappa pubblica</a><a href="/comune">Comune</a><a href="/emergenza">112 SIMULATO</a></nav>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <span id="live" class="live">connessione…</span>
+      <h2>Periodo</h2>
+      <select id="period">
+        <option value="7">Ultimi 7 giorni</option>
+        <option value="30" selected>Ultimi 30 giorni</option>
+        <option value="90">Ultimi 90 giorni</option>
+      </select>
+      <h2>Eventi per tipo (<span id="total">0</span>)</h2>
+      <div id="types"></div>
+      <h2>Livelli</h2>
+      <label class="row"><input type="checkbox" id="showHeat" checked> Heatmap (pesata per severità)</label>
+      <label class="row"><input type="checkbox" id="showMarkers" checked> Singoli eventi</label>
+      <h2>Legenda</h2>
+      <div class="note">
+        Cerchio pieno con bordo bianco = rilevato dal casco.<br>
+        Cerchio chiaro tratteggiato = dato storico SIMULATO.<br>
+        Dimensione = severità (1–5).<br><br>
+        Coordinate arrotondate a ~100 m, nessun dato personale.
+        "Impatto violento" indica un impatto compatibile con un urto, non un investimento accertato.
+        Posizione dei caschi simulata (nessun GPS nel prototipo).
+      </div>
+    </aside>
+    <div id="map" class="map"></div>
+  </div>
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/vendor/leaflet-heat/leaflet-heat.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

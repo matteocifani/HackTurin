@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-10-10T19:02:33+02:00",
+  "source": "OpenStreetMap contributors (ODbL), via Overpass API e Nominatim",
+  "note": "verified=false finché un umano non ha controllato il punto sulla mappa",
+  "points": [
+    {
+      "id": "regina_montebello_tarino",
+      "name": "Corso Regina Margherita (controviale tra via Montebello e via Tarino)",
+      "why": "Strada con più incidenti nel 2024 secondo la Polizia Locale (dato provvisorio, Clean Cities)",
+      "verified": false,
+      "lat": 45.07277,
+      "lon": 7.695562,
+      "method": "osm_street_crossing",
+      "detail": "Corso Regina Margherita × Via Montebello: incrocio trovato (scarto 0 m); Via Tarino: strada non trovata in OSM"
+    },
+    {
+      "id": "piazza_rivoli",
+      "name": "Piazza Rivoli",
+      "why": "Ciclisti investiti, più incidenti ravvicinati (Giornale La Voce)",
+      "verified": false,
+      "lat": 45.075756,
+      "lon": 7.642442,
+      "method": "nominatim",
+      "detail": "Piazza Rivoli, Parella, Circoscrizione 4, Torino, Piemonte, 10139, Italia"
+    },
+    {
+      "id": "regina_potenza_lecce",
+      "name": "Corso Regina Margherita / corso Potenza / corso Lecce",
+      "why": "Incrocio critico citato dalla stampa",
+      "verified": false,
+      "lat": 45.087118,
+      "lon": 7.651191,
+      "method": "osm_street_crossing",
+      "detail": "Corso Regina Margherita × Corso Potenza: incrocio trovato (scarto 0 m); Corso Regina Margherita × Corso Lecce: incrocio trovato (scarto 0 m); punto = media di 2 incroci distanti 79 m"
+    },
+    {
+      "id": "peschiera_trapani",
+      "name": "Corso Peschiera / corso Trapani",
+      "why": "Incrocio critico citato dalla stampa",
+      "verified": false,
+      "lat": 45.068973,
+      "lon": 7.638793,
+      "method": "osm_street_crossing",
+      "detail": "Corso Peschiera × Corso Trapani: incrocio trovato (scarto 0 m)"
+    },
+    {
+      "id": "giambone_corsica",
+      "name": "Corso Giambone / corso Corsica",
+      "why": "Incrocio critico citato dalla stampa",
+      "verified": false,
+      "lat": null,
+      "lon": null,
+      "method": "not_found",
+      "detail": "Corso Giambone × Corso Corsica: le strade non si incrociano (minimo 362 m)"
+    },
+    {
+      "id": "via_nizza",
+      "name": "Via Nizza",
+      "why": "Asse citato dalla stampa (strada lunga: il punto è solo indicativo)",
+      "verified": false,
+      "lat": 45.030342,
+      "lon": 7.666513,
+      "method": "nominatim",
+      "detail": "Via Nizza, Nizza Millefonti, Circoscrizione 8, Cavoretto, Torino, Piemonte, 10126, Italia"
+    },
+    {
+      "id": "po_vittorio_veneto",
+      "name": "Via Po / piazza Vittorio Veneto",
+      "why": "Zona critica citata dalla stampa",
+      "verified": false,
+      "lat": 45.065998,
+      "lon": 7.69356,
+      "method": "osm_street_crossing",
+      "detail": "Via Po × Piazza Vittorio Veneto: incrocio trovato (scarto 0 m)"
+    },
+    {
+      "id": "san_salvario",
+      "name": "San Salvario",
+      "why": "Quartiere citato dalla stampa (punto = centro del quartiere)",
+      "verified": false,
+      "lat": 45.05495,
+      "lon": 7.680152,
+      "method": "nominatim",
+      "detail": "San Salvario, Circoscrizione 8, Torino, Piemonte, 10125, Italia"
+    },
+    {
+      "id": "vanchiglia",
+      "name": "Vanchiglia",
+      "why": "Quartiere citato dalla stampa (punto = centro del quartiere)",
+      "verified": false,
+      "lat": 45.070438,
+      "lon": 7.698469,
+      "method": "nominatim",
+      "detail": "Vanchiglia, Circoscrizione 7, Torino, Piemonte, 10124, Italia"
+    }
+  ]
+}
