@@ -1,4 +1,4 @@
-# Bici ADAS posteriore (nome di lavoro: Guardaspalle)
+# ADAS posteriore (nome di lavoro: Guardaspalle)
 
 Sistema che guarda la strada **dietro al ciclista** e lo avvisa quando arriva un veicolo pericoloso.
 
