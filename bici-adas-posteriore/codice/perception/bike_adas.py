@@ -361,7 +361,7 @@ class Estimator:
                 self.on_red(t, tr)
         tr.max_level = max(tr.max_level, tr.level)
 
-    def zones(self, t, us_cm, cam_ok):
+    def zones(self, t, us_cm, cam_ok, us_v=None):
         a = self.a
         z = {"L": 0, "B": 0, "R": 0}
         top = None
@@ -376,9 +376,12 @@ class Estimator:
         self.fused = None
         if a.us_side == "B":
             # stessa direzione: da vicino vale l'ultrasuono (preciso), da lontano la camera
-            cam = min((tr.d for tr in self.tracks.values()
-                       if cam_ok and tr.zone == "B" and t - tr.last_t <= a.stale), default=None)
-            cam_cm = cam * 100 if cam is not None else None
+            near_tr = min((tr for tr in self.tracks.values()
+                           if cam_ok and tr.zone == "B" and t - tr.last_t <= a.stale),
+                          key=lambda tr: tr.d, default=None)
+            cam_cm = near_tr.d * 100 if near_tr else None
+            # camera: v = d / TTC = d * d(ln larghezza)/dt
+            cam_v = near_tr.d * 100 * near_tr.rate if near_tr and near_tr.rate is not None else None
             if us_cm is not None and cam_cm is not None:
                 w_us = clamp((a.us_trust + a.us_blend - us_cm) / a.us_blend, 0.0, 1.0)
                 cm = w_us * us_cm + (1 - w_us) * cam_cm
@@ -389,8 +392,17 @@ class Estimator:
             else:
                 w_us, cm = None, None
             if cm is not None:
+                # velocità con lo stesso peso della distanza; se ne manca una vale l'altra
+                if us_v is not None and cam_v is not None:
+                    v = w_us * us_v + (1 - w_us) * cam_v
+                else:
+                    v = us_v if us_v is not None and us_cm is not None else cam_v
+                ttc = cm / v if v is not None and v > 1.0 else None
                 self.fused = {"cm": round(cm), "w_us": round(w_us, 2),
-                              "cam_cm": fin(cam_cm, 0), "us_cm": fin(us_cm, 0)}
+                              "cam_cm": fin(cam_cm, 0), "us_cm": fin(us_cm, 0),
+                              "v_cms": fin(v, 1), "v_us": fin(us_v, 1), "v_cam": fin(cam_v, 1),
+                              "kmh_real": fin(v * 0.036 / a.scale, 1) if v is not None else None,
+                              "ttc": fin(ttc, 1)}
                 near = 2 if cm < a.near_red else 1 if cm < a.near_amber else 0
         elif us_cm is not None:
             near = 2 if us_cm < a.near_red else 1 if us_cm < a.near_amber else 0
@@ -447,6 +459,16 @@ class Ultrasonic:
         self.in_pass = False
         self.p_min = 9999.0
         self.p_start = self.p_last = 0.0
+        self.hist = collections.deque(maxlen=60)  # (t, cm) per la velocità
+
+    def speed(self, window=0.6):
+        """Velocità di avvicinamento in cm/s (positiva = si avvicina), dalla pendenza delle ultime letture."""
+        with self.lock:
+            pts = [p for p in self.hist if p[1] is not None and self.t - p[0] <= window]
+        if len(pts) < 5 or pts[-1][0] - pts[0][0] < 0.3:
+            return None
+        slope, _ = linfit([p[0] for p in pts], [p[1] for p in pts])
+        return -slope
 
     def feed(self, cm, t):
         """cm=None: niente entro 4 m."""
@@ -455,6 +477,7 @@ class Ultrasonic:
         with self.lock:
             self.cm = None if val >= 9999 else val
             self.t = t
+            self.hist.append((t, self.cm))
         near = self.cm is not None and self.cm < self.a.pass_start
         if near:
             if not self.in_pass:
@@ -983,7 +1006,7 @@ def main():
                 if a.us_side != "B":  # puntato indietro non vede i sorpassi, solo chi ti segue
                     est.on_pass(t_scene, cm, dur, t_start if mode != "video" else None)
 
-            zones, top, near = est.zones(t_scene, us_cm, cam_ok)
+            zones, top, near = est.zones(t_scene, us_cm, cam_ok, us.speed() if us else None)
             seq = (seq + 1) % 100000
             ttc_ds = int(clamp(top.ttc * 10, 0, 998)) if top and top.ttc < INF else 999
             tracks = [{

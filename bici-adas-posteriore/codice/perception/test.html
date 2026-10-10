@@ -62,6 +62,14 @@
       <div class="small" id="why"></div>
     </div>
     <div class="panel">
+      <div class="lbl">Velocità di avvicinamento</div>
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+        <div id="vv" class="v" style="font-size:34px;font-weight:800;font-variant-numeric:tabular-nums">-</div>
+        <div id="vreal" style="font-size:17px;font-weight:600"></div>
+      </div>
+      <div class="small" id="vsub"></div>
+    </div>
+    <div class="panel">
       <div class="lbl">Camera contro ultrasuono (quando l'ultrasuono è affidabile)</div>
       <div class="stats">
         <div>Errore medio camera<br><b id="mae">-</b></div>
@@ -152,6 +160,17 @@ async function tick() {
     verdict = "Strada libera"; why = "Nessuno dei due vede niente dietro.";
   }
   setCard("fus", fusM, "libero");
+
+  // velocità: la stima la Pi dalla pendenza della distanza nel tempo (stesso orologio per camera e ultrasuono)
+  const fv = F ? F.v_cms : null;
+  const sp = v => v == null ? "-" : `${v > 0 ? "" : "−"}${Math.abs(v).toFixed(0)} cm/s`;
+  $("vv").textContent = fv == null ? "-" : sp(fv);
+  $("vv").style.color = fv == null ? "var(--muted)" : fv > 1 ? "var(--fg)" : "var(--muted)";
+  $("vreal").textContent = F && F.kmh_real != null && fv > 1 ?
+    (S.scale && S.scale !== 1 ? `≈ ${F.kmh_real.toFixed(0)} km/h in scala reale (1:${Math.round(1 / S.scale)})` : `${F.kmh_real.toFixed(1)} km/h`) : "";
+  $("vsub").textContent = !F ? "serve --us-side B" :
+    `camera ${sp(F.v_cam)} · ultrasuono ${sp(F.v_us)}` + (F.ttc != null ? ` · impatto tra ${F.ttc} s` : "") +
+    (fv != null && fv <= 1 ? " · non si avvicina" : "");
   const zb = S.zones ? S.zones.B : 0;
   $("fuss").textContent = (src ? src + " · " : "") + "casco: " + ["verde", "ambra", "rosso"][zb || 0];
   $("verdict").textContent = verdict; $("why").textContent = why;
