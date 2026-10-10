@@ -1,0 +1,19 @@
+# Avvio automatico sul Raspberry: la bici funziona senza portatile.
+# Installazione (cambiate "utente" con il vostro utente):
+#   sudo cp guardaspalle.service /etc/systemd/system/
+#   sudo systemctl enable --now guardaspalle
+#   journalctl -u guardaspalle -f        # per vedere i messaggi
+[Unit]
+Description=Guardaspalle - percezione posteriore
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=utente
+WorkingDirectory=/home/utente/poc/perception
+ExecStart=/home/utente/gs/bin/python bike_adas.py --source 0 --us-trig 23 --us-echo 24 --us-side B --clips --stream
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

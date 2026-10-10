@@ -1,0 +1,5 @@
+logs/
+*.mp4
+__pycache__/
+*_ncnn_model/
+*.pt
