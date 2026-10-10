@@ -37,6 +37,8 @@ import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import profili_mezzo  # stesso ADAS su bici, monopattino, auto, furgone, camion, bus
+
 try:
     import cv2
 except ImportError:  # in --fake senza video basta la libreria standard
@@ -121,7 +123,8 @@ def parse_args():
     g.add_argument("--stream", action="store_true", help="video annotato su /video.mjpg")
     g.add_argument("--show", action="store_true", help="finestra OpenCV (solo con desktop)")
     g.add_argument("--log-tracks", action="store_true", help="CSV con tutte le tracce, fotogramma per fotogramma")
-    return p.parse_args()
+    profili_mezzo.aggiungi(p)
+    return profili_mezzo.parse(p)
 
 
 # ---------------------------------------------------------------- utilità
@@ -860,6 +863,28 @@ def model_imgsz(path):
         return None
 
 
+def dedupe(dets, iou_max=0.5, inside_max=0.8):
+    """Un veicolo, un riquadro: se due riquadri si coprono (anche di classi diverse, es. auto/camion,
+    o uno dentro l'altro) resta quello più sicuro. Costa pochi microsecondi con una decina di riquadri."""
+    keep = []
+    for d in sorted(dets, key=lambda d: -d[6]):
+        area = (d[4] - d[2]) * (d[5] - d[3])
+        dup = False
+        for k in keep:
+            iw = min(d[4], k[4]) - max(d[2], k[2])
+            ih = min(d[5], k[5]) - max(d[3], k[3])
+            if iw <= 0 or ih <= 0:
+                continue
+            inter = iw * ih
+            ka = (k[4] - k[2]) * (k[5] - k[3])
+            if inter / (area + ka - inter) > iou_max or inter / max(1e-6, min(area, ka)) > inside_max:
+                dup = True
+                break
+        if not dup:
+            keep.append(d)
+    return keep
+
+
 class Detector:
     def __init__(self, a):
         from ultralytics import YOLO
@@ -898,9 +923,10 @@ class Detector:
         b = r.boxes
         if b is None or b.id is None:
             return []
-        return [(tid, c, bx1 + x0, by1 + y0, bx2 + x0, by2 + y0, round(p, 2))
+        dets = [(tid, c, bx1 + x0, by1 + y0, bx2 + x0, by2 + y0, round(p, 2))
                 for (bx1, by1, bx2, by2), tid, c, p in zip(b.xyxy.tolist(), b.id.int().tolist(),
                                                            b.cls.int().tolist(), b.conf.tolist())]
+        return dedupe(dets)
 
 
 # ---------------------------------------------------------------- video annotato e clip
@@ -1103,6 +1129,7 @@ def start_server(port):
 
 def main():
     a = parse_args()
+    profili_mezzo.pesa_classi(CLASSES, a.mezzo)
     os.makedirs(a.log_dir, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log = EventLog(os.path.join(a.log_dir, f"eventi_{stamp}.csv"))
@@ -1199,6 +1226,7 @@ def main():
                 "top": {"cls": top.name, "ttc": fin(top.ttc, 1), "zone": top.zone, "level": top.level} if top else None,
                 "tracks": tracks, "counts": dict(est.counts), "last_pass": est.last_pass,
                 "calib": {"k": round(est.k, 2), "n": est.k_n, "mae_cm": est.mae_cm()}, "pass_safe": a.pass_safe,
+                "mezzo": profili_mezzo.info(a.mezzo), "rider_half": a.rider_half,
                 "helmet": {"ok": now - helmet["t"] < 3, "look": helmet["look"], "fall": helmet["fall"],
                            "info": helmet["info"]},
                 "gps": gps_ok,
