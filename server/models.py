@@ -10,6 +10,7 @@ TORINO_LON = (7.50, 7.85)
 
 EventType = Literal["BUCA", "CADUTA_DA_DISSESTO", "IMPATTO_VIOLENTO", "CADUTA_SENZA_CAUSA_RILEVATA"]
 AlarmState = Literal["NONE", "SENT", "CANCELED", "MOVEMENT_RESUMED"]
+Origin = Literal["helmet", "simulator", "demo_seed"]
 Status = Literal["NUOVO", "VERIFICATO", "IN_LAVORAZIONE", "RISOLTO", "FALSO_POSITIVO"]
 
 MAX_AGE_MS = 366 * 24 * 3600 * 1000  # un anno: copre anche i dati di seed (90 giorni)
@@ -30,7 +31,8 @@ class EventIn(BaseModel):
     alarm_state: AlarmState
     features: dict = Field(default_factory=dict)
     classifier: str = "rules-v1"
-    simulated: bool = False
+    simulated: bool = False                    # true per seed e simulatore, false solo per il casco reale
+    origin: Origin = "helmet"                  # il server lo salva come "source" (SPEC v0.3)
     fw: Optional[str] = None
 
     @model_validator(mode="after")
@@ -40,6 +42,9 @@ class EventIn(BaseModel):
             raise ValueError("emergency deve essere true se e solo se alarm_state == 'SENT'")
         if self.type == "BUCA" and self.alarm_state != "NONE":
             raise ValueError("un evento BUCA deve avere alarm_state 'NONE'")
+        # un dato simulato non deve mai passare per casco reale, e viceversa
+        if self.simulated != (self.origin != "helmet"):
+            raise ValueError("simulated deve essere false se e solo se origin == 'helmet'")
         return self
 
 

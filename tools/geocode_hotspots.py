@@ -139,6 +139,7 @@ def main():
     for item in items:
         old = previous.get(item["id"])
         if old and old.get("lat") is not None:
+            old.update(name=item["name"], why=item.get("why", ""))   # testi sempre allineati all'input
             points.append(old)
             print(f"= {item['name']}: già presente ({old['lat']}, {old['lon']})")
             continue

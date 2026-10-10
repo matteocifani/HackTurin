@@ -74,6 +74,9 @@ tbody tr.new { animation: rownew 3s ease-out; }
 .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 12px; font-weight: 600; }
 .badge.sim { background: var(--sim-bg); color: var(--sim); }
 .badge.helmet { background: #e3f0ff; color: var(--accent); }
+.badge.simtool { background: #3b3f46; color: #fff; }
+.leaflet-tooltip.sim-tag { background: #3b3f46; color: #fff; border: 0; font-weight: 700; font-size: 11px; padding: 0 4px; box-shadow: none; }
+.leaflet-tooltip.sim-tag::before { display: none; }
 .sev { font-weight: 700; }
 ol.hot { padding-left: 20px; margin: 0; font-size: 13px; }
 ol.hot li { padding: 3px 0; cursor: pointer; }

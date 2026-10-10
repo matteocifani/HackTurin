@@ -28,6 +28,13 @@ function fmtDate(ts) {
 }
 function typeLabel(t) { return (TYPES[t] || { label: t }).label; }
 function isSim(e) { return e.simulated; }
+// Fonte sempre dichiarata (SPEC v0.3 §3.4): casco reale, simulatore ("SIM") o storico simulato.
+const SOURCE_BADGE = {
+  helmet:    '<span class="badge helmet">Casco</span>',
+  simulator: '<span class="badge simtool">SIM · simulatore</span>',
+  demo_seed: '<span class="badge sim">Storico simulato</span>',
+};
+function sourceBadge(e) { return SOURCE_BADGE[e.source] || `<span class="badge">${esc(e.source)}</span>`; }
 function setLive(ok) {
   const el = document.getElementById("live");
   if (!el) return;
@@ -48,7 +55,7 @@ function makeMap(id) {
 // Marker: dati simulati più chiari e tratteggiati, eventi del casco pieni con bordo bianco.
 function eventMarker(e, pulse) {
   const sim = isSim(e);
-  return L.circleMarker([e.lat, e.lon], {
+  const m = L.circleMarker([e.lat, e.lon], {
     radius: 4 + e.severity,
     color: sim ? "#444" : "#fff",
     weight: sim ? 1 : 2,
@@ -57,11 +64,12 @@ function eventMarker(e, pulse) {
     fillOpacity: sim ? 0.5 : 0.95,
     className: pulse ? "pulse" : "",
   });
+  if (e.source === "simulator") m.bindTooltip("SIM", { permanent: true, direction: "right", className: "sim-tag", offset: [6, 0] });
+  return m;
 }
 
 function popupHtml(e, full) {
-  const src = isSim(e) ? '<span class="badge sim">dato SIMULATO</span>' : '<span class="badge helmet">casco</span>';
-  let html = `<b>${esc(typeLabel(e.type))}</b> ${src}<br>${esc(fmtDate(e.ts))} · severità ${e.severity}/5`;
+  let html = `<b>${esc(typeLabel(e.type))}</b> ${sourceBadge(e)}<br>${esc(fmtDate(e.ts))} · severità ${e.severity}/5`;
   if (e.alarm_state !== "NONE") html += `<br>Allarme: ${esc(ALARM_LABEL[e.alarm_state])}`;
   if (full) {
     html += `<br>Stato: ${esc(e.status)} · #${e.id}`;
@@ -194,7 +202,7 @@ function initComune() {
         <td><span class="dot" style="background:${TYPES[e.type]?.color}"></span> ${esc(typeLabel(e.type))}</td>
         <td class="sev">${e.severity}</td>
         <td><select data-eid="${esc(e.event_id)}">${STATUSES.map(s => `<option${s === e.status ? " selected" : ""}>${s}</option>`).join("")}</select></td>
-        <td>${e.source === "demo_seed" ? '<span class="badge sim">SIMULATO</span>' : '<span class="badge helmet">casco</span>'}</td>
+        <td>${sourceBadge(e)}</td>
         <td>${esc(ALARM_LABEL[e.alarm_state])}</td>
         <td>${esc(e.device_id)}</td>
       </tr>`).join("");
@@ -303,7 +311,7 @@ function initEmergenza() {
 
   function listItem(e) {
     return `<div class="item"><b>${esc(typeLabel(e.type))}</b> — ${esc(fmtDate(e.ts))} — ${e.lat.toFixed(5)}, ${e.lon.toFixed(5)}
-      — ${esc(e.device_id)} ${isSim(e) ? '<span class="badge sim">dato SIMULATO</span>' : ""} — stato ${esc(e.status)}</div>`;
+      — ${esc(e.device_id)} ${sourceBadge(e)} — stato ${esc(e.status)}</div>`;
   }
 
   function beep() {
@@ -336,7 +344,7 @@ function initEmergenza() {
         <div>Ora evento</div><div>${esc(new Date(e.ts).toLocaleString("it-IT"))}</div>
         <div>Coordinate</div><div>${e.lat.toFixed(5)}, ${e.lon.toFixed(5)} — posizione ${e.position_source === "simulated_route" ? "SIMULATA" : esc(e.position_source)}<br>
           <a href="/comune?focus=${e.id}" target="_blank">apri sulla mappa del Comune</a></div>
-        <div>Dispositivo</div><div>${esc(e.device_id)} ${isSim(e) ? "(dato SIMULATO)" : ""}</div>
+        <div>Dispositivo</div><div>${esc(e.device_id)}${e.source === "simulator" ? "<br><b>Evento generato dal simulatore</b>" : e.source === "demo_seed" ? " (storico simulato)" : ""}</div>
         <div>Picco impatto</div><div>${val(f.impact_peak_g, "g")}</div>
         <div>Rotazione testa</div><div>${val(f.rotation_deg, "°")}</div>
         <div>Immobilità</div><div>${val(f.still_s, "s")}</div>

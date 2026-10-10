@@ -154,3 +154,31 @@ def test_stats_excludes_false_positives(client):
 def test_pages_served(client):
     for path in ("/", "/comune", "/emergenza", "/static/vendor/leaflet/leaflet.js"):
         assert client.get(path).status_code == 200, path
+
+
+# ---------- origine dei dati (SPEC v0.3) ----------
+def test_origin_default_is_helmet(client):
+    ev = make_event()
+    ev.pop("origin", None)
+    assert client.post("/api/events", json=ev).json()["event"]["source"] == "helmet"
+
+
+def test_simulator_and_seed_origin_saved_as_source(client):
+    sim = client.post("/api/events", json=make_event(simulated=True, origin="simulator")).json()["event"]
+    seed = client.post("/api/events", json=make_event(simulated=True, origin="demo_seed")).json()["event"]
+    assert sim["source"] == "simulator" and sim["simulated"] is True
+    assert seed["source"] == "demo_seed"
+    assert [e["source"] for e in client.get("/api/events?public=1").json()] == ["simulator", "demo_seed"]
+    assert "simulator" in client.get("/api/export.csv").text
+
+
+def test_simulated_flag_must_match_origin(client):
+    # un dato simulato non deve mai poter passare per casco reale, e viceversa
+    assert client.post("/api/events", json=make_event(simulated=True)).status_code == 422
+    assert client.post("/api/events", json=make_event(simulated=False, origin="simulator")).status_code == 422
+    assert client.post("/api/events", json=make_event(simulated=True, origin="pippo")).status_code == 422
+
+
+def test_csv_features_are_json(client):
+    client.post("/api/events", json=make_event())
+    assert '""shock_peak_g"": 2.1' in client.get("/api/export.csv").text

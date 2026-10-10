@@ -53,7 +53,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
     def post_event(ev: EventIn, response: Response):
         received = enrich.now_utc()
         ts = enrich.event_time(received, ev.age_ms)
-        row = ev.model_dump()
+        row = ev.model_dump(exclude={"origin"})
         row.update(
             received_at=enrich.iso_local(received),
             ts=enrich.iso_local(ts),
@@ -62,7 +62,7 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
             severity=enrich.severity(ev.type, ev.features),
             time_slot=enrich.time_slot(ts),
             cell_id=enrich.cell_id(ev.lat, ev.lon),
-            source="demo_seed" if ev.simulated else "helmet",
+            source=ev.origin,
         )
         saved, created = db.insert_event(row)
         response.status_code = 201 if created else 200   # 200 = reinvio già ricevuto, nessun doppione

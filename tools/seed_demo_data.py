@@ -1,7 +1,7 @@
 """Popola il server con ~300 eventi STORICI SIMULATI negli ultimi 90 giorni (SPEC §9).
 
 I luoghi sono reali (data/hotspots.json), la distribuzione di tipi, orari e quantità è INVENTATA.
-Ogni evento ha simulated=true → il server lo marca source="demo_seed" e la UI lo mostra come SIMULATO.
+Ogni evento ha simulated=true e origin="demo_seed": la UI lo mostra come storico SIMULATO.
 Gli event_id sono deterministici (--seed): rilanciare lo script non crea doppioni.
 
 Uso (server avviato):
@@ -45,7 +45,7 @@ def main():
             when -= timedelta(days=1)
         ev = build_event(event_type=etype, lat=lat, lon=lon, age_ms=(now - when).total_seconds() * 1000,
                          device_id=f"seed-casco-{rng.randint(1, 40):02d}", alarm=alarm_for(etype, False, rng),
-                         rng=rng, simulated=True, classifier="demo_seed", position_source="demo_seed")
+                         rng=rng, origin="demo_seed", classifier="demo_seed", position_source="demo_seed")
         try:
             status, body = post_json(f"{args.server}/api/events", ev)
         except OSError as exc:

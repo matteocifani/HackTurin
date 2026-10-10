@@ -1,7 +1,8 @@
 """Imita il casco (lato Linux UNO Q) senza hardware: eventi POST /api/events + heartbeat (SPEC §9).
 
 Serve a sviluppare server e mappa in parallelo al firmware. Solo libreria standard.
-Gli eventi hanno device_id "casco-sim" e classifier "simulator": in dashboard si riconoscono.
+Gli eventi hanno simulated=true e origin="simulator" (SPEC v0.3): mappa, /comune e /emergenza
+li etichettano sempre "SIM", anche se usati in demo al posto del casco (Piano B).
 Se il server non risponde, gli eventi restano in coda in memoria e vengono reinviati
 (lo stesso event_id → il server non crea doppioni), come farà il casco vero.
 
@@ -88,7 +89,7 @@ def main():
                     etype = rng.choice(TYPES[1:])
                 alarm = alarm_for(etype, args.emergency, rng)
                 ev = build_event(event_type=etype, lat=lat, lon=lon, age_ms=0, device_id=args.device_id,
-                                 alarm=alarm, rng=rng, simulated=False, classifier="simulator",
+                                 alarm=alarm, rng=rng, origin="simulator", classifier="simulator",
                                  position_source="simulated_route")
                 delay_ms = rng.randint(100, 800) if etype == "BUCA" else FALL_DELAY_MS
                 # come su Linux: salvo età al momento del "poll" e monotonic di ricezione (SPEC §6)

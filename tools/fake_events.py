@@ -72,7 +72,7 @@ def alarm_for(event_type: str, force_emergency: bool, rng: random.Random) -> str
 
 
 def build_event(*, event_type: str, lat: float, lon: float, age_ms: int, device_id: str, alarm: str,
-                rng: random.Random, simulated: bool, classifier: str, position_source: str) -> dict:
+                rng: random.Random, origin: str, classifier: str, position_source: str) -> dict:
     f = features_for(event_type, rng)
     if alarm in ("SENT", "CANCELED"):
         f["still_s"] = round(rng.uniform(8, 12), 1)
@@ -90,7 +90,8 @@ def build_event(*, event_type: str, lat: float, lon: float, age_ms: int, device_
         "alarm_state": alarm,
         "features": f,
         "classifier": classifier,
-        "simulated": simulated,
+        "simulated": origin != "helmet",          # SPEC v0.3: false solo per il casco reale
+        "origin": origin,
         "fw": "sim",
     }
 

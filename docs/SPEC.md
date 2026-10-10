@@ -116,7 +116,7 @@ Questo è il punto di integrazione tra le persone del team: **non cambiarlo senz
 {
   "event_id": "uuid4",                       // generato su Linux; il server è idempotente su questo campo
   "device_id": "casco-01",
-  "age_ms": 18450,                           // età dell'evento al momento dell'invio (vedi sotto)
+  "age_ms": 18450,                           // età dell'evento al momento dell'invio (vedi sotto); valido 0 … 1 anno (serve al seed a 90 giorni)
   "age_uncertain": false,                    // opzionale: true se Linux si è riavviato con l'evento in coda
   "device_ts": "2026-10-11T10:15:30+02:00",  // solo informativo: ora Linux della UNO Q, potrebbe essere sbagliata
   "lat": 45.07, "lon": 7.68,
@@ -127,7 +127,8 @@ Questo è il punto di integrazione tra le persone del team: **non cambiarlo senz
   "alarm_state": "SENT",
   "features": { ... },                       // copia di "f" dall'MCU
   "classifier": "rules-v1",
-  "simulated": false,                        // true solo per i dati generati dallo script di seed
+  "simulated": false,                        // true per dati del seed E del simulatore; false solo per il casco reale
+  "origin": "helmet",                        // opzionale, default "helmet": "helmet" | "simulator" | "demo_seed"
   "fw": "0.1.0"
 }
 ```
@@ -143,7 +144,9 @@ Questo è il punto di integrazione tra le persone del team: **non cambiarlo senz
 
 ### 3.4 Campi aggiunti dal server
 
-`id` (intero autoincrementale, usato dal polling del web), `received_at`, `ts` (calcolato come sopra), `status` (`NUOVO` | `VERIFICATO` | `IN_LAVORAZIONE` | `RISOLTO` | `FALSO_POSITIVO`), `severity` (1–5, §4), `time_slot` (`notte` 0–6, `mattina` 6–12, `pomeriggio` 12–18, `sera` 18–24), `cell_id` (cella griglia ~100 m per gli hotspot), `source` (`helmet` | `demo_seed`).
+`id` (intero autoincrementale, usato dal polling del web), `received_at`, `ts` (calcolato come sopra), `status` (`NUOVO` | `VERIFICATO` | `IN_LAVORAZIONE` | `RISOLTO` | `FALSO_POSITIVO`), `severity` (1–5, §4), `time_slot` (`notte` 0–6, `mattina` 6–12, `pomeriggio` 12–18, `sera` 18–24), `cell_id` (cella griglia ~100 m per gli hotspot), `source` (= `origin` ricevuto: `helmet` | `simulator` | `demo_seed`).
+
+Regola UI: gli eventi con `source = simulator` sono **sempre etichettati** come tali (badge "SIM" sul marker, colonna fonte in `/comune`, riga "Evento generato dal simulatore" sulla scheda di `/emergenza`). Così, se in demo si usa il Piano B (simulatore al posto del casco), è visibile a tutti.
 
 ## 4. Tassonomia eventi (cosa sappiamo distinguere con la sola IMU)
 
@@ -175,13 +178,17 @@ Regole di comunicazione (anche nel pitch):
 
 **Tipi di episodio** (decisi mentre l'episodio è in corso):
 - **Episodio d'impatto**: se durante l'episodio `a_mag ≥ T_IMPACT_G` → è il **candidato caduta**: si entra subito in `IMPACT_ANALYSIS`, con istante d'impatto = inizio dell'episodio. Un episodio d'impatto **non è mai** precursore di sé stesso.
-- **Episodio di shock**: episodio chiuso senza superare `T_IMPACT_G` → diventa lo **shock in attesa** (`pending_shock`: picco, istante di fine). Se ne arriva un altro mentre il primo è in attesa, si tiene quello con il picco maggiore (un solo evento SHOCK, niente doppioni).
+- **Episodio di shock**: episodio chiuso senza superare `T_IMPACT_G` → aggiorna lo **shock in attesa** (`pending_shock`), che contiene tre valori:
+  - `peak` e `peak_end_ms`: picco e istante di fine dell'episodio **con il picco maggiore** visto finora;
+  - `last_end_ms`: istante di fine dell'episodio **più recente**;
+  - `first_ms`: inizio del primo episodio della serie.
+  Più episodi ravvicinati (es. pavé, binari) producono così **un solo** evento SHOCK.
 
 **Shock in attesa**:
-- Se entro `SHOCK_TO_FALL_MAX_MS` dalla sua fine **non** inizia un episodio d'impatto → si emette un evento `SHOCK` e si azzera.
+- Si emette un evento `SHOCK` (con `peak`) e si azzera quando: `ora − last_end_ms ≥ SHOCK_TO_FALL_MAX_MS` senza che sia iniziato un episodio d'impatto, **oppure** `ora − first_ms ≥ SHOCK_PENDING_MAX_MS` (strada dissestata continua: si emette comunque, poi riparte una nuova serie).
 - Se inizia un episodio d'impatto → il timeout dello shock in attesa viene **sospeso** finché `IMPACT_ANALYSIS` non si conclude (evita il doppione SHOCK + FALL).
 
-**Precursore**: lo shock in attesa vale come precursore della caduta solo se `inizio_impatto − fine_shock ≥ SHOCK_GAP_MIN_MS` (e ≤ `SHOCK_TO_FALL_MAX_MS`). Razionale fisico, da confermare con le prove: tra la buca e l'arrivo della testa a terra passano alcune centinaia di ms; due picchi più vicini fanno parte dello stesso impatto.
+**Precursore**: lo shock in attesa vale come precursore della caduta solo se `SHOCK_GAP_MIN_MS ≤ inizio_impatto − peak_end_ms ≤ SHOCK_TO_FALL_MAX_MS` (si misura dall'episodio con il picco maggiore). In quel caso `shock_peak_g = peak` e `shock_to_impact_ms = inizio_impatto − peak_end_ms`. Razionale fisico, da confermare con le prove: tra la buca e l'arrivo della testa a terra passano alcune centinaia di ms; due picchi più vicini fanno parte dello stesso impatto.
 
 **Esito di `IMPACT_ANALYSIS`**:
 - caduta confermata (`rotation_deg ≥ ROT_FALL_DEG`) → lo shock in attesa, se è un precursore valido, viene consumato nelle feature della FALL (`shock_peak_g`, `shock_to_impact_ms`); altrimenti viene scartato. Nessun evento SHOCK separato. → `STILLNESS_CHECK`;
@@ -225,6 +232,7 @@ Valori **iniziali da calibrare**: NON sono valori validati, servono solo per par
 | `SHOCK_MERGE_MS` | 100 | 100 | unisce superamenti vicini nello stesso episodio |
 | `SHOCK_GAP_MIN_MS` | 200 | 200 | distanza minima shock → impatto per contare come precursore |
 | `SHOCK_TO_FALL_MAX_MS` | 1500 | 1500 | |
+| `SHOCK_PENDING_MAX_MS` | 5000 | 5000 | durata massima di una serie di shock prima di emetterla comunque |
 | `POST_IMPACT_SETTLE_MS` | 1000 | 1000 | |
 | `ROT_FALL_DEG` | 50 | 50 | |
 | `STILL_ACC_STD_G` / `STILL_GYRO_DPS` | 0.05 / 10 | 0.05 / 10 | |
@@ -278,7 +286,19 @@ Comune a tutte le pagine: banner visibile **"Demo HackTurin — include dati sto
 
 ## 9. Dati demo e strumenti
 
-- `data/hotspots_input.json`: elenco di luoghi **reali** citati dalla stampa/dati come critici (vedi `docs/PIANO_TEAM_E_DEMO.md` §Fonti): corso Regina Margherita (controviale tra via Montebello e via Tarino), piazza Rivoli, corso Regina Margherita/corso Potenza/corso Lecce, corso Peschiera/corso Trapani, corso Giambone/corso Corsica, via Nizza, via Po/piazza Vittorio Veneto, San Salvario, Vanchiglia.
+- `data/hotspots_input.json`: elenco di luoghi **reali**. Il campo `why` deve dire **esattamente** perché il luogo è in lista, senza esagerare (testi da usare così):
+
+| id | `why` |
+|---|---|
+| `regina_montebello_tarino` | Corso Regina Margherita: strada con più incidenti nel 2024 secondo la Polizia Locale (dato provvisorio, Clean Cities 29/05/2024); bambino in bici morto il 22/09/2026 nel controviale tra via Montebello e via Tarino (TorinoToday) |
+| `piazza_rivoli` | Due cicliste investite in due giorni (Giornale La Voce) |
+| `regina_potenza_lecce` | Uno degli incroci dotati di T-Red, installati dal Comune negli incroci più incidentati (SicurAuto) |
+| `peschiera_trapani` | Uno degli incroci dotati di T-Red, installati dal Comune negli incroci più incidentati (SicurAuto) |
+| `via_nizza` | Asse ciclabile molto usato: ciclisti quasi raddoppiati in 5 anni (Eco dalle Città). Non è un dato di incidentalità |
+| `po_vittorio_veneto` | Pavimentazione in lose e binari del tram segnalati come rischiosi da ciclisti (commenti di utenti, fonte debole) |
+| `san_salvario`, `vanchiglia` | Tra le zone con più multe a monopattini e bici nel 2025, quindi alta presenza di micromobilità (Clean Cities). Non è un dato di incidentalità |
+
+  **Corso Giambone / corso Corsica escluso**: in OpenStreetMap le due strade non si incrociano e non abbiamo una fonte verificata sul punto esatto. Meglio 8 luoghi certi che uno inventato.
 - `tools/geocode_hotspots.py`: geocodifica i nomi con Nominatim (OSM), max 1 richiesta/s, User-Agent esplicito, salva `data/hotspots.json`. **Un umano verifica i punti sulla mappa** prima dell'uso. Non scrivere coordinate a memoria.
 - `tools/seed_demo_data.py`: genera ~300 eventi negli ultimi 90 giorni attorno agli hotspot (dispersione ~60 m), mix di tipi, `simulated=true`, `source="demo_seed"`. La **distribuzione è inventata** e va dichiarata tale; solo i luoghi sono reali.
 - `tools/simulate_helmet.py`: imita il casco (eventi + heartbeat) senza hardware, con opzioni `--type`, `--emergency`, `--rate`. Serve per sviluppare server e mappa in parallelo al firmware.
@@ -371,3 +391,9 @@ Chiamata reale al 112 o SMS reali; GPS reale; app smartphone; autenticazione/ute
 - §10: nomi di cartelle e file di `helmet_app/` dettati dall'esempio ufficiale App Lab, non dalla SPEC.
 - §11 Fase 2: due test in più sul precursore.
 - §13: punto 112 aggiornato con le fonti trovate.
+
+**v0.3 (10/10/2026, dopo Fase 1)** — **Cambia il contratto §3.2/§3.4: avvisare P2 e P3.**
+- §3.2: nuovo campo opzionale `origin`; il simulatore invia `simulated=true`, `origin="simulator"`; `age_ms` valido da 0 a 1 anno.
+- §3.4: `source` può valere `simulator`; regola UI: eventi del simulatore sempre etichettati "SIM".
+- §5.2: definito con precisione lo shock in attesa (picco maggiore per il precursore, fine dell'ultimo episodio per il timeout) e nuovo parametro `SHOCK_PENDING_MAX_MS` per le strade dissestate continue.
+- §9: testi `why` degli hotspot corretti secondo le fonti reali; escluso corso Giambone/corso Corsica.

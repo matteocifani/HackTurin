@@ -13,14 +13,22 @@
         "Via Tarino"
       ]
     ],
-    "why": "Strada con più incidenti nel 2024 secondo la Polizia Locale (dato provvisorio, Clean Cities)"
+    "why": "Corso Regina Margherita: strada con più incidenti nel 2024 secondo la Polizia Locale (dato provvisorio, Clean Cities 29/05/2024); bambino in bici morto il 22/09/2026 nel controviale tra via Montebello e via Tarino (TorinoToday)",
+    "expect": [
+      "Corso Regina Margherita",
+      "Via Montebello",
+      "Via Tarino"
+    ]
   },
   {
     "id": "piazza_rivoli",
     "name": "Piazza Rivoli",
     "kind": "place",
     "query": "Piazza Rivoli, Torino",
-    "why": "Ciclisti investiti, più incidenti ravvicinati (Giornale La Voce)"
+    "why": "Due cicliste investite in due giorni (Giornale La Voce)",
+    "expect": [
+      "Piazza Rivoli"
+    ]
   },
   {
     "id": "regina_potenza_lecce",
@@ -36,7 +44,12 @@
         "Corso Lecce"
       ]
     ],
-    "why": "Incrocio critico citato dalla stampa"
+    "why": "Uno degli incroci dotati di T-Red, installati dal Comune negli incroci più incidentati (SicurAuto)",
+    "expect": [
+      "Corso Regina Margherita",
+      "Corso Potenza",
+      "Corso Lecce"
+    ]
   },
   {
     "id": "peschiera_trapani",
@@ -48,26 +61,21 @@
         "Corso Trapani"
       ]
     ],
-    "why": "Incrocio critico citato dalla stampa"
-  },
-  {
-    "id": "giambone_corsica",
-    "name": "Corso Giambone / corso Corsica",
-    "kind": "intersection",
-    "pairs": [
-      [
-        "Corso Giambone",
-        "Corso Corsica"
-      ]
-    ],
-    "why": "Incrocio critico citato dalla stampa"
+    "why": "Uno degli incroci dotati di T-Red, installati dal Comune negli incroci più incidentati (SicurAuto)",
+    "expect": [
+      "Corso Peschiera",
+      "Corso Trapani"
+    ]
   },
   {
     "id": "via_nizza",
     "name": "Via Nizza",
     "kind": "place",
     "query": "Via Nizza, Torino",
-    "why": "Asse citato dalla stampa (strada lunga: il punto è solo indicativo)"
+    "why": "Asse ciclabile molto usato: ciclisti quasi raddoppiati in 5 anni (Eco dalle Città). Non è un dato di incidentalità",
+    "expect": [
+      "Via Nizza"
+    ]
   },
   {
     "id": "po_vittorio_veneto",
@@ -79,20 +87,30 @@
         "Piazza Vittorio Veneto"
       ]
     ],
-    "why": "Zona critica citata dalla stampa"
+    "why": "Pavimentazione in lose e binari del tram segnalati come rischiosi da ciclisti (commenti di utenti, fonte debole)",
+    "expect": [
+      "Via Po",
+      "Piazza Vittorio Veneto"
+    ]
   },
   {
     "id": "san_salvario",
     "name": "San Salvario",
     "kind": "place",
     "query": "San Salvario, Torino",
-    "why": "Quartiere citato dalla stampa (punto = centro del quartiere)"
+    "why": "Tra le zone con più multe a monopattini e bici nel 2025, quindi alta presenza di micromobilità (Clean Cities). Non è un dato di incidentalità",
+    "expect": [
+      "San Salvario"
+    ]
   },
   {
     "id": "vanchiglia",
     "name": "Vanchiglia",
     "kind": "place",
     "query": "Vanchiglia, Torino",
-    "why": "Quartiere citato dalla stampa (punto = centro del quartiere)"
+    "why": "Tra le zone con più multe a monopattini e bici nel 2025, quindi alta presenza di micromobilità (Clean Cities). Non è un dato di incidentalità",
+    "expect": [
+      "Vanchiglia"
+    ]
   }
 ]
