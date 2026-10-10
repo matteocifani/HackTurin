@@ -43,6 +43,26 @@ function setLive(ok) {
 }
 function isoDaysAgo(days) { return new Date(Date.now() - days * 86400000).toISOString(); }
 
+// Notifica discreta di nuovo evento: riquadro in basso a destra, sparisce dopo 6 s
+const SOURCE_TEXT = { helmet: "casco", simulator: "SIM · simulatore", demo_seed: "storico simulato" };
+function toast(e) {
+  let box = document.getElementById("toasts");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "toasts"; box.className = "toasts";
+    box.setAttribute("aria-live", "polite");
+    document.body.appendChild(box);
+  }
+  while (box.children.length >= 4) box.firstElementChild.remove();
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.style.setProperty("--type-color", (TYPES[e.type] || {}).color || "#6c737c");
+  t.innerHTML = `<div class="t-title">Nuovo evento · ${esc(typeLabel(e.type))}</div>
+    <div class="t-sub">${esc(new Date(e.ts).toLocaleTimeString("it-IT"))} · severità ${e.severity}/5 · ${esc(SOURCE_TEXT[e.source] || e.source)}${e.emergency ? " · allarme inviato" : ""}</div>`;
+  box.appendChild(t);
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 250); }, 6000);
+}
+
 function makeMap(id) {
   const map = L.map(id).setView(TORINO, 13);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -126,7 +146,7 @@ function initPublic() {
       st.maxId = Math.max(st.maxId, e.id);
       if (!visible(e)) { st.events.delete(e.id); continue; }
       st.events.set(e.id, e);
-      if (markFresh) { st.fresh.add(e.id); setTimeout(() => { st.fresh.delete(e.id); }, 4000); }
+      if (markFresh) { st.fresh.add(e.id); setTimeout(() => { st.fresh.delete(e.id); }, 4000); toast(e); }
     }
   }
 
@@ -249,7 +269,7 @@ function initComune() {
       const list = await api(`/api/events?after_id=${st.maxId}`);
       if (list.length) {
         const fresh = new Set();
-        for (const e of list) { st.events.set(e.id, e); st.maxId = Math.max(st.maxId, e.id); fresh.add(e.id); }
+        for (const e of list) { st.events.set(e.id, e); st.maxId = Math.max(st.maxId, e.id); fresh.add(e.id); toast(e); }
         st.sig = "";
         renderAll(fresh); loadStats();
       }
@@ -302,87 +322,204 @@ function initComune() {
 }
 
 // ======================================================================
-// Pannello "112 SIMULATO" "/emergenza"
+// Pannello "/emergenza": console di dispatch SIMULATA
 // ======================================================================
+const FALL_TYPES = ["CADUTA_DA_DISSESTO", "IMPATTO_VIOLENTO", "CADUTA_SENZA_CAUSA_RILEVATA"];
+// Nota per tipo: la classificazione è indicativa, mai una diagnosi (SPEC §4)
+const TYPE_NOTE = {
+  IMPATTO_VIOLENTO: "Impatto compatibile con un urto, non accertato.",
+  CADUTA_DA_DISSESTO: "Caduta preceduta da un urto (possibile buca o dissesto), non accertato.",
+  CADUTA_SENZA_CAUSA_RILEVATA: "Caduta senza urto precedente rilevato (es. scivolata), causa non accertata.",
+};
+const STATUS_LABEL = { NUOVO: "Nuova", VERIFICATO: "Verificata", IN_LAVORAZIONE: "Presa in carico", RISOLTO: "Chiusa", FALSO_POSITIVO: "Falso positivo" };
+
 function initEmergenza() {
-  const st = { maxId: 0, audio: null, beepTimer: null, current: null };
-  const overlay = document.getElementById("overlay");
-  const list = document.getElementById("list");
+  const st = { events: new Map(), maxId: 0, selected: null, unread: new Set(), days: 1, audio: null, map: null };
+  const queueEl = document.getElementById("queue");
+  const detail = document.getElementById("detail");
+  const pad = n => String(n).padStart(2, "0");
+  const fmtTime = ts => new Date(ts).toLocaleTimeString("it-IT");
+  const fmtFull = ts => new Date(ts).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const isHigh = e => e.emergency === true;
+  const prioBadge = e => isHigh(e) ? '<span class="prio alta">ALTA</span>' : '<span class="prio media">MEDIA</span>';
+  const srcTag = e => e.source === "simulator" ? '<span class="srctag" title="Evento generato dal simulatore">SIM</span>'
+    : e.source === "demo_seed" ? '<span class="srctag" title="Dato storico simulato">STORICO SIM.</span>' : "";
 
-  function listItem(e) {
-    return `<div class="item"><b>${esc(typeLabel(e.type))}</b> — ${esc(fmtDate(e.ts))} — ${e.lat.toFixed(5)}, ${e.lon.toFixed(5)}
-      — ${esc(e.device_id)} ${sourceBadge(e)} — stato ${esc(e.status)}</div>`;
+  function elapsed(ts) {
+    let s = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 1000));
+    const d = Math.floor(s / 86400); s %= 86400;
+    const t = `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+    return d ? `${d} g ${t}` : t;
   }
 
-  function beep() {
-    if (!st.audio) return;
+  // ---- avviso acustico: tono breve e discreto, al massimo 3 volte ----
+  const audioBtn = document.getElementById("audioBtn");
+  audioBtn.addEventListener("click", () => {
+    const on = audioBtn.getAttribute("aria-pressed") !== "true";
+    audioBtn.setAttribute("aria-pressed", String(on));
+    audioBtn.textContent = "Avviso acustico: " + (on ? "attivo" : "disattivato");
+    if (on) { st.audio = st.audio || new (window.AudioContext || window.webkitAudioContext)(); st.audio.resume(); tone(1); }
+  });
+  function tone(times) {
+    if (!st.audio || audioBtn.getAttribute("aria-pressed") !== "true") return;
     const ctx = st.audio;
-    [0, 0.45, 0.9, 1.35].forEach((t, i) => {
+    for (let i = 0; i < Math.min(times, 3); i++) {
+      const t0 = ctx.currentTime + i * 1.1;
       const o = ctx.createOscillator(), g = ctx.createGain();
-      o.frequency.value = i % 2 ? 660 : 880;
-      g.gain.value = 0.25;
+      o.type = "sine"; o.frequency.value = 740;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.12, t0 + 0.02);
+      g.gain.linearRampToValueAtTime(0, t0 + 0.18);
       o.connect(g).connect(ctx.destination);
-      o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.35);
-    });
+      o.start(t0); o.stop(t0 + 0.2);
+    }
   }
-  document.getElementById("audioBtn").addEventListener("click", ev => {
-    st.audio = st.audio || new (window.AudioContext || window.webkitAudioContext)();
-    st.audio.resume();
-    beep();
-    ev.target.textContent = "Audio attivo ✓";
+
+  // ---- coda ----
+  const inRange = e => new Date(e.ts).getTime() >= Date.now() - st.days * 86400000;
+  function renderQueue() {
+    const list = [...st.events.values()].filter(inRange).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    document.getElementById("qcount").textContent = list.length;
+    queueEl.innerHTML = list.map(e => `
+      <li><button class="q-item ${isHigh(e) ? "alta" : ""} ${st.selected === e.id ? "selected" : ""}" data-id="${e.id}"
+          aria-current="${st.selected === e.id}">
+        ${prioBadge(e)}
+        <span class="q-time">${esc(fmtTime(e.ts))}</span>
+        <span class="q-type">${esc(typeLabel(e.type))}</span>
+        <span class="q-meta">${st.unread.has(e.id) ? '<span class="q-new">NUOVA · </span>' : ""}${esc(STATUS_LABEL[e.status] || e.status)} ${srcTag(e)}</span>
+      </button></li>`).join("") || '<li class="d-empty">Nessuna segnalazione nel periodo.</li>';
+  }
+  queueEl.addEventListener("click", ev => {
+    const b = ev.target.closest("button[data-id]");
+    if (b) select(+b.dataset.id);
   });
 
-  function show(e) {
-    st.current = e;
-    const f = e.features || {};
-    const val = (v, u) => (v === undefined || v === null ? "–" : `${v} ${u}`);
-    document.getElementById("card").innerHTML = `
-      <div class="fixed">SIMULAZIONE — nessuna chiamata reale al 112</div>
-      <h2>🚨 ${esc(typeLabel(e.type))}</h2>
-      <div style="font-size:20px">Persona immobile dopo la caduta, allarme non annullato.</div>
-      <div class="grid">
-        <div>Ora evento</div><div>${esc(new Date(e.ts).toLocaleString("it-IT"))}</div>
-        <div>Coordinate</div><div>${e.lat.toFixed(5)}, ${e.lon.toFixed(5)} — posizione ${e.position_source === "simulated_route" ? "SIMULATA" : esc(e.position_source)}<br>
-          <a href="/comune?focus=${e.id}" target="_blank">apri sulla mappa del Comune</a></div>
-        <div>Dispositivo</div><div>${esc(e.device_id)}${e.source === "simulator" ? "<br><b>Evento generato dal simulatore</b>" : e.source === "demo_seed" ? " (storico simulato)" : ""}</div>
-        <div>Picco impatto</div><div>${val(f.impact_peak_g, "g")}</div>
-        <div>Rotazione testa</div><div>${val(f.rotation_deg, "°")}</div>
-        <div>Immobilità</div><div>${val(f.still_s, "s")}</div>
-        <div>Urto precedente</div><div>${f.shock_to_impact_ms >= 0 ? `${val(f.shock_peak_g, "g")}, ${f.shock_to_impact_ms} ms prima` : "nessuno"}</div>
-        <div>Classificazione</div><div>${esc(e.classifier)} (indicativa)</div>
-      </div>
-      <button id="ackBtn">Presa in carico</button> <button id="closeBtn">Chiudi</button>`;
-    overlay.classList.remove("show"); void overlay.offsetWidth; overlay.classList.add("show");
-    clearInterval(st.beepTimer);
-    beep(); st.beepTimer = setInterval(beep, 4000);
-    document.getElementById("closeBtn").onclick = hide;
-    document.getElementById("ackBtn").onclick = async () => {
-      try { await api(`/api/events/${encodeURIComponent(e.event_id)}`, { method: "PATCH", body: JSON.stringify({ status: "IN_LAVORAZIONE" }) }); } catch { }
-      hide();
-    };
+  // ---- scheda della segnalazione ----
+  function select(id) {
+    st.selected = id; st.unread.delete(id);
+    renderQueue(); renderDetail();
   }
-  function hide() { overlay.classList.remove("show"); clearInterval(st.beepTimer); }
-
-  async function init() {
+  function alarmOutcome(e) {
+    const s = e.features ? e.features.still_s : null;
+    const still = s == null ? "—" : `${s} s`;
+    if (e.alarm_state === "SENT") return `Allarme inviato automaticamente dopo ${still} di immobilità; non annullato dall'utente.`;
+    if (e.alarm_state === "CANCELED") return `Allarme annullato dall'utente durante il conto alla rovescia (immobilità ${still}).`;
+    if (e.alarm_state === "MOVEMENT_RESUMED") return `Allarme non inviato: la persona si è mossa dopo la caduta (immobilità ${still}).`;
+    return "Nessun allarme.";
+  }
+  function renderDetail() {
+    const e = st.events.get(st.selected);
+    if (st.map) { st.map.remove(); st.map = null; }
+    if (!e) { detail.innerHTML = '<p class="d-empty">Nessuna segnalazione selezionata.</p>'; return; }
+    const f = e.features || {};
+    const num = (v, u, dec = 1) => (v == null ? "—" : `${Number(v).toFixed(dec)} ${u}`);
+    const pre = f.shock_to_impact_ms >= 0 ? `${num(f.shock_peak_g, "g")} · ${f.shock_to_impact_ms} ms prima` : "nessuno";
+    const ns = e.lat >= 0 ? "N" : "S", ew = e.lon >= 0 ? "E" : "W";
+    const source = e.source === "simulator" ? "<dd><b>Evento generato dal simulatore</b></dd>"
+      : e.source === "demo_seed" ? "<dd><b>Dato storico simulato</b> (script di seed)</dd>" : "<dd>Casco (dispositivo reale)</dd>";
+    detail.innerHTML = `
+      <div class="d-title">${prioBadge(e)}<h2>${esc(typeLabel(e.type))}</h2>
+        <span class="d-status">Stato: ${esc(STATUS_LABEL[e.status] || e.status)}</span>${srcTag(e)}</div>
+      <p class="d-note">${esc(TYPE_NOTE[e.type] || "")} Classificazione automatica indicativa (${esc(e.classifier)}).</p>
+      <div class="d-cols">
+        <section class="d-section">
+          <h3>Segnalazione</h3>
+          <dl class="d-kv">
+            <dt>ID evento</dt><dd class="mono">${esc(e.event_id)}</dd>
+            <dt>Ora evento</dt><dd class="mono">${esc(fmtFull(e.ts))}</dd>
+            <dt>Ora ricezione</dt><dd class="mono">${esc(fmtFull(e.received_at))}</dd>
+            <dt>Tempo trascorso</dt><dd class="d-elapsed" id="elapsed">${elapsed(e.ts)}</dd>
+          </dl>
+        </section>
+        <section class="d-section">
+          <h3>Esito dell'allarme</h3>
+          <p style="margin:0">${esc(alarmOutcome(e))}</p>
+          <h3 style="margin-top:14px">Fonte</h3>
+          <dl class="d-kv"><dt>Dispositivo</dt><dd class="mono">${esc(e.device_id)}</dd><dt>Origine</dt>${source}</dl>
+        </section>
+        <section class="d-section">
+          <h3>Posizione (WGS84)</h3>
+          <div class="d-coords">${Math.abs(e.lat).toFixed(6)}° ${ns}, ${Math.abs(e.lon).toFixed(6)}° ${ew}</div>
+          <div class="note" style="color:var(--d-muted)">Posizione ${e.position_source === "simulated_route" ? "simulata (percorso predefinito, nessun GPS)" : esc(e.position_source)}
+            · <a href="/comune?focus=${e.id}" target="_blank" style="color:var(--d-text)">apri nella dashboard Comune</a></div>
+          <div id="minimap" class="d-minimap" role="img" aria-label="Mappa della posizione segnalata"></div>
+        </section>
+        <section class="d-section">
+          <h3>Dati del sensore</h3>
+          <table class="d-sensor">
+            <tr><th scope="row">Picco impatto</th><td>${num(f.impact_peak_g, "g")}</td></tr>
+            <tr><th scope="row">Rotazione della testa</th><td>${num(f.rotation_deg, "°", 0)}</td></tr>
+            <tr><th scope="row">Immobilità misurata</th><td>${num(f.still_s, "s")}</td></tr>
+            <tr><th scope="row">Urto precedente</th><td>${esc(pre)}</td></tr>
+          </table>
+          <div class="d-actions">
+            <button class="act" id="takeBtn" ${["IN_LAVORAZIONE", "RISOLTO"].includes(e.status) ? "disabled" : ""}>Presa in carico</button>
+            <button id="closeBtn" ${e.status === "RISOLTO" ? "disabled" : ""}>Chiudi</button>
+          </div>
+        </section>
+      </div>`;
+    st.map = L.map("minimap").setView([e.lat, e.lon], 16);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(st.map);
+    L.marker([e.lat, e.lon]).addTo(st.map);
+    document.getElementById("takeBtn").onclick = () => setStatus(e, "IN_LAVORAZIONE");
+    document.getElementById("closeBtn").onclick = () => setStatus(e, "RISOLTO");
+  }
+  async function setStatus(e, status) {
     try {
-      const em = await api("/api/emergencies?limit=5000");
-      st.maxId = em.reduce((m, e) => Math.max(m, e.id), 0);   // le emergenze già presenti non fanno scattare l'allarme
-      list.innerHTML = em.slice(-10).reverse().map(listItem).join("") || '<div class="note">Nessuna emergenza registrata.</div>';
+      const upd = await api(`/api/events/${encodeURIComponent(e.event_id)}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      st.events.set(upd.id, upd);
+      renderQueue(); renderDetail();
+    } catch { alert("Cambio stato non riuscito: server non raggiungibile?"); }
+  }
+
+  // ---- dati ----
+  const typeParam = `type=${FALL_TYPES.join(",")}`;
+  async function loadAll() {
+    try {
+      const list = await api(`/api/events?${typeParam}`);
+      const sel = st.events.get(st.selected);
+      st.events = new Map(list.map(e => [e.id, e]));
+      st.maxId = list.reduce((m, e) => Math.max(m, e.id), st.maxId);
+      renderQueue();
+      const now = st.events.get(st.selected);
+      if (sel && now && sel.status !== now.status) renderDetail();   // ridisegno la scheda solo se è cambiato lo stato
       setLive(true);
     } catch { setLive(false); }
   }
   async function poll() {
     try {
-      const em = await api(`/api/emergencies?after_id=${st.maxId}`);
-      for (const e of em) {
+      const list = await api(`/api/events?${typeParam}&after_id=${st.maxId}`);
+      let high = null;
+      for (const e of list) {
         st.maxId = Math.max(st.maxId, e.id);
-        list.insertAdjacentHTML("afterbegin", listItem(e));
-        show(e);
+        st.events.set(e.id, e);
+        st.unread.add(e.id);
+        if (e.emergency) high = e;
       }
+      if (high) { tone(3); select(high.id); }        // priorità alta: tono discreto e scheda in primo piano
+      else if (list.length) renderQueue();
       setLive(true);
     } catch { setLive(false); }
   }
-  init().then(() => setInterval(poll, POLL_MS));
+  document.getElementById("range").addEventListener("change", ev => { st.days = +ev.target.value; renderQueue(); });
+
+  setInterval(() => {
+    document.getElementById("clock").textContent = new Date().toLocaleTimeString("it-IT");
+    const el = document.getElementById("elapsed"), e = st.events.get(st.selected);
+    if (el && e) el.textContent = elapsed(e.ts);
+  }, 1000);
+
+  loadAll().then(() => {
+    // all'apertura seleziono la segnalazione ad alta priorità più recente ancora aperta
+    const open = [...st.events.values()]
+      .filter(e => isHigh(e) && inRange(e) && !["RISOLTO", "FALSO_POSITIVO"].includes(e.status))
+      .sort((a, b) => new Date(b.ts) - new Date(a.ts))[0];
+    if (open) select(open.id);
+    setInterval(poll, POLL_MS);
+    setInterval(loadAll, 20000);   // riallinea i cambi di stato fatti da /comune
+  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -3,23 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Casco Sentinella — 112 SIMULATO</title>
+  <title>Centrale operativa — Simulazione allarmi Casco Sentinella</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-page="emergenza" class="emergenza">
-  <div class="sim-banner">Demo HackTurin — include dati storici SIMULATI</div>
-  <div class="em-fixed">SIMULAZIONE — nessuna chiamata reale al 112</div>
-  <main class="em-main">
-    <h1>Centrale operativa (simulata) — allarmi automatici dal casco</h1>
-    <p class="em-status"><span id="live" class="live">connessione…</span></p>
-    <p><button id="audioBtn" class="primary">Attiva audio</button>
-      <span class="em-status">Il browser riproduce suoni solo dopo un clic: premilo prima della demo.</span></p>
-    <p class="em-status">Modello di riferimento: pacchetto dati minimo (MSD) dell'eCall delle auto, Reg. UE 2015/758.
-      Si attiva solo quando il casco ha rilevato una caduta, la persona è rimasta immobile e l'allarme non è stato annullato.</p>
-    <h2>Ultime emergenze</h2>
-    <div id="list" class="em-list"></div>
-  </main>
-  <div id="overlay" class="em-overlay"><div id="card" class="em-card"></div></div>
+<!-- Pagina dimostrativa: nessun logo, emblema o nome di servizi reali. Non è un'interfaccia ufficiale. -->
+<body data-page="emergenza" class="dispatch">
+  <div class="d-simbar" role="note">AMBIENTE DI SIMULAZIONE — nessuna chiamata reale al 112 · Demo HackTurin, include dati storici simulati</div>
+  <header class="d-head">
+    <h1>Centrale operativa — Simulazione allarmi Casco Sentinella</h1>
+    <div class="d-tools">
+      <span id="clock" class="mono" aria-label="Ora corrente"></span>
+      <span id="live" class="live">connessione…</span>
+      <label>Periodo
+        <select id="range">
+          <option value="1">ultime 24 h</option>
+          <option value="7">ultimi 7 giorni</option>
+          <option value="90">ultimi 90 giorni</option>
+        </select>
+      </label>
+      <button id="audioBtn" aria-pressed="false">Avviso acustico: disattivato</button>
+      <a href="/comune">Dashboard Comune</a>
+    </div>
+  </header>
+  <div class="d-grid">
+    <section class="d-queue" aria-label="Coda delle segnalazioni">
+      <div class="d-queue-head">Coda segnalazioni (<span id="qcount">0</span>) · più recenti in alto</div>
+      <ol id="queue"></ol>
+    </section>
+    <section class="d-detail" id="detail" aria-live="polite">
+      <p class="d-empty">Nessuna segnalazione selezionata.</p>
+    </section>
+  </div>
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
