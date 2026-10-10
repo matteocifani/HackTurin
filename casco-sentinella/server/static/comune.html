@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Casco Sentinella — Dashboard Comune</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="comune">
+  <div class="sim-banner">Demo HackTurin — include dati storici SIMULATI (luoghi reali, distribuzione inventata)</div>
+  <header class="top">
+    <h1>Casco Sentinella · Dashboard Comune</h1>
+    <nav><a href="/">Mappa pubblica</a><a class="active" href="/comune">Comune</a><a href="/emergenza">112 SIMULATO</a></nav>
+  </header>
+  <div class="comune">
+    <div id="map" class="map"></div>
+    <aside class="side">
+      <span id="live" class="live">connessione…</span>
+      <h2>Caschi</h2>
+      <div id="devices"></div>
+      <div class="note">Posizione dei caschi SIMULATA (percorso predefinito).</div>
+      <h2>Top 10 hotspot (somma severità, celle ~100 m)</h2>
+      <ol id="hot" class="hot"></ol>
+      <h2>Conteggi (esclusi falsi positivi)</h2>
+      <div id="byType"></div>
+      <h2>Open data</h2>
+      <a href="/api/export.csv" download><button class="primary">Esporta CSV</button></a>
+      <a href="/api/export.csv?public=1" download><button>CSV pubblico</button></a>
+      <p class="note">Nessuna autenticazione in demo.</p>
+    </aside>
+    <div class="tablewrap">
+      <div class="toolbar">
+        <select id="fType"><option value="">Tutti i tipi</option></select>
+        <select id="fStatus"><option value="">Tutti gli stati</option></select>
+        <select id="fSource"><option value="">Tutte le fonti</option><option value="helmet">Casco</option><option value="simulator">SIM · simulatore</option><option value="demo_seed">Storico simulato</option></select>
+        <span id="shown" class="note"></span>
+      </div>
+      <table id="events">
+        <thead><tr>
+          <th data-key="id">#</th><th data-key="ts">Data</th><th data-key="type">Tipo</th><th data-key="severity">Sev.</th>
+          <th data-key="status">Stato</th><th data-key="source">Fonte</th><th data-key="alarm_state">Allarme</th><th data-key="device_id">Dispositivo</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/vendor/leaflet-heat/leaflet-heat.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+{
+  "generated_at": "2026-10-10T19:30:49+02:00",
+  "source": "OpenStreetMap contributors (ODbL), via Overpass API e Nominatim",
+  "note": "verified=false finché un umano non ha controllato il punto sulla mappa",
+  "points": [
+    {
+      "id": "regina_montebello_tarino",
+      "name": "Corso Regina Margherita (controviale tra via Montebello e via Tarino)",
+      "why": "Corso Regina Margherita: strada con più incidenti nel 2024 secondo la Polizia Locale (dato provvisorio, Clean Cities 29/05/2024); bambino in bici morto il 22/09/2026 nel controviale tra via Montebello e via Tarino (TorinoToday)",
+      "verified": false,
+      "lat": 45.07277,
+      "lon": 7.695562,
+      "method": "osm_street_crossing",
+      "detail": "Corso Regina Margherita × Via Montebello: incrocio trovato (scarto 0 m); Via Tarino: strada non trovata in OSM",
+      "reverse_check": {
+        "road": "Corso Regina Margherita",
+        "zone": "Vanchiglia",
+        "matches_expected": true
+      }
+    },
+    {
+      "id": "piazza_rivoli",
+      "name": "Piazza Rivoli",
+      "why": "Due cicliste investite in due giorni (Giornale La Voce)",
+      "verified": false,
+      "lat": 45.075756,
+      "lon": 7.642442,
+      "method": "nominatim",
+      "detail": "Piazza Rivoli, Parella, Circoscrizione 4, Torino, Piemonte, 10139, Italia",
+      "reverse_check": {
+        "road": "Piazza Rivoli",
+        "zone": "Parella",
+        "matches_expected": true
+      }
+    },
+    {
+      "id": "regina_potenza_lecce",
+      "name": "Corso Regina Margherita / corso Potenza / corso Lecce",
+      "why": "Uno degli incroci dotati di T-Red, installati dal Comune negli incroci più incidentati (SicurAuto)",
+      "verified": false,
+      "lat": 45.087118,
+      "lon": 7.651191,
+      "method": "osm_street_crossing",
+      "detail": "Corso Regina Margherita × Corso Potenza: incrocio trovato (scarto 0 m); Corso Regina Margherita × Corso Lecce: incrocio trovato (scarto 0 m); punto = media di 2 incroci distanti 79 m",
+      "reverse_check": {
+        "road": "Corso Lecce",
+        "zone": "Campidoglio",
+        "matches_expected": true
+      }
+    },
+    {
+      "id": "peschiera_trapani",
+      "name": "Corso Peschiera / corso Trapani",
+      "why": "Uno degli incroci dotati di T-Red, installati dal Comune negli incroci più incidentati (SicurAuto)",
+      "verified": false,
+      "lat": 45.068973,
+      "lon": 7.638793,
+      "method": "osm_street_crossing",
+      "detail": "Corso Peschiera × Corso Trapani: incrocio trovato (scarto 0 m)",
+      "reverse_check": {
+        "road": "Corso Trapani",
+        "zone": "Cenisia",
+        "matches_expected": true
+      }
+    },
+    {
+      "id": "via_nizza",
+      "name": "Via Nizza",
+      "why": "Asse ciclabile molto usato: ciclisti quasi raddoppiati in 5 anni (Eco dalle Città). Non è un dato di incidentalità",
+      "verified": false,
+      "lat": 45.030342,
+      "lon": 7.666513,
+      "method": "nominatim",
+      "detail": "Via Nizza, Nizza Millefonti, Circoscrizione 8, Cavoretto, Torino, Piemonte, 10126, Italia",
+      "reverse_check": {
+        "road": "Via Nizza",
+        "zone": "Nizza Millefonti",
+        "matches_expected": true
+      }
+    },
+    {
+      "id": "po_vittorio_veneto",
+      "name": "Via Po / piazza Vittorio Veneto",
+      "why": "Pavimentazione in lose e binari del tram segnalati come rischiosi da ciclisti (commenti di utenti, fonte debole)",
+      "verified": false,
+      "lat": 45.065998,
+      "lon": 7.69356,
+      "method": "osm_street_crossing",
+      "detail": "Via Po × Piazza Vittorio Veneto: incrocio trovato (scarto 0 m)",
+      "reverse_check": {
+        "road": "Piazza Vittorio Veneto",
+        "zone": "Centro",
+        "matches_expected": true
+      }
+    },
+    {
+      "id": "san_salvario",
+      "name": "San Salvario",
+      "why": "Tra le zone con più multe a monopattini e bici nel 2025, quindi alta presenza di micromobilità (Clean Cities). Non è un dato di incidentalità",
+      "verified": false,
+      "lat": 45.05495,
+      "lon": 7.680152,
+      "method": "nominatim",
+      "detail": "San Salvario, Circoscrizione 8, Torino, Piemonte, 10125, Italia",
+      "reverse_check": {
+        "road": "Via Federico Campana",
+        "zone": "San Salvario",
+        "matches_expected": true
+      }
+    },
+    {
+      "id": "vanchiglia",
+      "name": "Vanchiglia",
+      "why": "Tra le zone con più multe a monopattini e bici nel 2025, quindi alta presenza di micromobilità (Clean Cities). Non è un dato di incidentalità",
+      "verified": false,
+      "lat": 45.070438,
+      "lon": 7.698469,
+      "method": "nominatim",
+      "detail": "Vanchiglia, Circoscrizione 7, Torino, Piemonte, 10124, Italia",
+      "reverse_check": {
+        "road": "Via Cesare Balbo",
+        "zone": "Vanchiglia",
+        "matches_expected": true
+      }
+    }
+  ]
+}
