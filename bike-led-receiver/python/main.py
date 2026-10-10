@@ -29,6 +29,21 @@ last_log = 0.0
 print("listening on TCP", PORT, "DEBUG_RED", DEBUG_RED)
 
 
+def on_alert(kind, value, ms):
+    """Fall detection from the sketch: "IMPACT" (value = dRMS mg) or "FALL" (value = tilt deg).
+    Runs in the Bridge thread: print only. Forwarding to the Pi is still to be decided."""
+    print("alert", kind, value, "mcu_ms", ms)
+
+
+def on_log(msg, value, ms):
+    """Every fall-detection event of the sketch (TILT, FALSE POSITIVE, MOVED, ...); value is in thousandths."""
+    print("fall-log", ms, "ms", msg, value / 1000)
+
+
+Bridge.provide("alert", on_alert)
+Bridge.provide("log", on_log)
+
+
 def receive():
     """Wait up to 0.1 s, return the complete lines (one JSON message each) received."""
     global conn, buf, last_addr
