@@ -39,7 +39,7 @@
   .lab.l1 { background: var(--amber); color: #1b1200; }
   .lab.l2 { background: var(--red); color: #fff; }
   #edge { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .2s;
-    box-shadow: inset 0 0 36px 2px var(--red); }
+    box-shadow: inset 0 0 26px 0 var(--red); }
   #tap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; background: rgba(20, 23, 28, .86); color: #fff; font-size: 22px; font-weight: 600; text-align: center; padding: 24px; }
   #tap small { color: #9aa3ae; font-size: 14px; font-weight: 400; max-width: 300px; }
@@ -118,6 +118,7 @@ function demoState(now) {
   { const d = 11 + 3 * Math.sin(t / 3); tracks.push(mk(3, "auto", d, -0.1, null, false)); }
   { const d = 24 - cyc(2, 17) * 30; tracks.push(mk(4, "moto", d, 2.6, d > 3 ? d / 8 : null, d < 2)); }
   function mk(id, cls, d, lat, ttc, edge) {
+    lat += Math.sign(lat) * (half - 0.35);  // con un mezzo più largo gli altri passano più in là
     const w = { auto: 1.8, camion: 2.5, bici: 0.6, moto: 0.8 }[cls], len = { auto: 4.5, camion: 9, bici: 1.8, moto: 2.1 }[cls];
     const clear = Math.max(0, Math.abs(lat) - w / 2);
     const zone = clear < half ? "B" : lat > 0 ? "L" : "R";
@@ -147,185 +148,297 @@ function demoState(now) {
 const T = THREE;
 T.ColorManagement.legacyMode = false;  // i colori esadecimali sono sRGB, come in CSS
 const C = LIGHT
-  ? { bg: 0xe2e4e7, ground: 0xc4c8cd, line: 0xffffff, edge: 0xf4f5f6, car: 0x8e949c, glass: 0x5d636b, ego: 0xffffff, hemi: [0xffffff, 0x8a9098, 0.75] }
-  : { bg: 0x16191d, ground: 0x08090b, line: 0xc9ced5, edge: 0x4a515b, car: 0xa3a9b1, glass: 0x3c424a, ego: 0xffffff, hemi: [0xffffff, 0x252a31, 0.7] };
+  ? { bg: 0xe4e6e9, ground: 0xcfd3d8, road: 0xb4b9bf, line: 0xffffff, edge: 0xf2f3f5, car: 0x8d939b, glass: 0x3a3f46,
+      env: ["#ffffff", "#e9ebee", "#9aa0a8"], expo: 1.0 }
+  : { bg: 0x1b1e23, ground: 0x1d2025, road: 0x08090b, line: 0xd6dbe1, edge: 0x6a727d, car: 0x8f959e, glass: 0x1d2025,
+      env: ["#c9ced6", "#4a5059", "#0e1013"], expo: 1.05 };
 const RISK = [null, new T.Color(0xffb020), new T.Color(0xff3b3b)];
 
-const renderer = new T.WebGLRenderer({ antialias: true });
+const renderer = new T.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = T.PCFSoftShadowMap;
 renderer.outputEncoding = T.sRGBEncoding;
+renderer.toneMapping = T.ACESFilmicToneMapping;
+renderer.toneMappingExposure = C.expo;
 document.body.prepend(renderer.domElement);
 
 const scene = new T.Scene();
 scene.background = new T.Color(C.bg);
-scene.fog = new T.Fog(C.bg, 22, 55);
+scene.fog = new T.Fog(C.bg, 24, 62);
 const camera = new T.PerspectiveCamera(45, 1, 0.5, 200);
 
-scene.add(new T.HemisphereLight(C.hemi[0], C.hemi[1], C.hemi[2]));
-const sun = new T.DirectionalLight(0xffffff, LIGHT ? 0.6 : 0.7);
-sun.position.set(-6, 18, 10);
-sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 22, bottom: -22, near: 1, far: 60 });
-sun.shadow.radius = 4;
-scene.add(sun, sun.target);
+// luce ambientale da un "cielo" sfumato: dà i riflessi morbidi alla carrozzeria
+(function envLight() {
+  const c = document.createElement("canvas"); c.width = 512; c.height = 256;
+  const g = c.getContext("2d"), gr = g.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, C.env[0]); gr.addColorStop(0.48, C.env[1]); gr.addColorStop(0.52, C.env[2]); gr.addColorStop(1, C.env[2]);
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 256);
+  // due "finestre" luminose: danno il riflesso lungo sul cofano e sul tetto
+  g.fillStyle = "rgba(255,255,255,.9)"; g.fillRect(60, 40, 140, 26); g.fillRect(300, 30, 160, 20);
+  const tex = new T.CanvasTexture(c); tex.mapping = T.EquirectangularReflectionMapping; tex.encoding = T.sRGBEncoding;
+  const pm = new T.PMREMGenerator(renderer);
+  scene.environment = pm.fromEquirectangular(tex).texture;
+  pm.dispose();
+})();
+const sun = new T.DirectionalLight(0xffffff, LIGHT ? 0.7 : 0.6);
+sun.position.set(-4, 16, 8);
+scene.add(sun, new T.HemisphereLight(0xffffff, 0x20242a, LIGHT ? 0.4 : 0.2));
 
-// strada
-const ground = new T.Mesh(new T.PlaneGeometry(200, 300), new T.MeshStandardMaterial({ color: C.ground, roughness: 1 }));
-ground.rotation.x = -Math.PI / 2; ground.position.z = -60; ground.receiveShadow = true;
+// strada: asfalto scuro sulle corsie, banchine più chiare ai lati, come la Tesla
+const groundMat = new T.MeshStandardMaterial({ color: C.ground, roughness: 0.95, envMapIntensity: 0.08 });
+const ground = new T.Mesh(new T.PlaneGeometry(240, 320), groundMat);
+ground.rotation.x = -Math.PI / 2; ground.position.z = -60;
 scene.add(ground);
-const lineMat = new T.MeshBasicMaterial({ color: C.line });
-const edgeMat = new T.MeshBasicMaterial({ color: C.edge });
+const roadMat = new T.MeshStandardMaterial({ color: C.road, roughness: 0.9, metalness: 0.0, envMapIntensity: 0.05 });
+const lineMat = new T.MeshBasicMaterial({ color: C.line, toneMapped: false });
+const edgeMat = new T.MeshBasicMaterial({ color: C.edge, toneMapped: false });
 const road = new T.Group(); scene.add(road);
 const dashes = new T.Group(); scene.add(dashes);
 function buildRoad(ew) {
   road.clear(); dashes.clear();
   const laneW = Math.max(3.4, ew + 1.6), half = laneW / 2;
+  const right = -(half + 0.6), left = half + 2 * laneW + 0.4;
+  const asphalt = new T.Mesh(new T.PlaneGeometry(left - right + 0.6, 170), roadMat);
+  asphalt.rotation.x = -Math.PI / 2; asphalt.position.set((left + right) / 2, 0.004, -50); road.add(asphalt);
   const strip = (x, mat, w) => {
-    const m = new T.Mesh(new T.PlaneGeometry(w, 160), mat);
+    const m = new T.Mesh(new T.PlaneGeometry(w, 170), mat);
     m.rotation.x = -Math.PI / 2; m.position.set(x, 0.01, -50); road.add(m);
   };
-  strip(-(half + 0.6), edgeMat, 0.12);           // bordo a destra di chi guida
-  strip(half + laneW + 0.4, edgeMat, 0.12);      // bordo sinistro della carreggiata
-  strip(half + laneW + 3.6 + laneW, edgeMat, 0.12);
-  for (const x of [half, half + laneW + 3.6]) {   // linee tratteggiate
-    for (let z = -120; z < 40; z += 9) {
-      const m = new T.Mesh(new T.PlaneGeometry(0.13, 3.2), lineMat);
+  strip(right, edgeMat, 0.14);
+  strip(left, edgeMat, 0.14);
+  for (const x of [half, half + laneW]) {
+    for (let z = -130; z < 40; z += 9) {
+      const m = new T.Mesh(new T.PlaneGeometry(0.14, 3.4), lineMat);
       m.rotation.x = -Math.PI / 2; m.position.set(x, 0.012, z); dashes.add(m);
     }
   }
 }
 
-// alone colorato sotto i veicoli e macchie di rischio attorno a te
-function radialTex() {
+// texture sfumate: alone colorato, ombra morbida a terra, macchie di rischio
+function radialTex(inner) {
   const c = document.createElement("canvas"); c.width = c.height = 128;
   const g = c.getContext("2d"), r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(0.55, "rgba(255,255,255,.45)"); r.addColorStop(1, "rgba(255,255,255,0)");
+  r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(inner, "rgba(255,255,255,.5)"); r.addColorStop(1, "rgba(255,255,255,0)");
   g.fillStyle = r; g.fillRect(0, 0, 128, 128);
   return new T.CanvasTexture(c);
 }
 function stripTex() {
-  const c = document.createElement("canvas"); c.width = 64; c.height = 4;
+  const c = document.createElement("canvas"); c.width = 64; c.height = 64;
   const g = c.getContext("2d"), r = g.createLinearGradient(0, 0, 64, 0);
   r.addColorStop(0, "rgba(255,255,255,0)"); r.addColorStop(0.5, "rgba(255,255,255,1)"); r.addColorStop(1, "rgba(255,255,255,0)");
-  g.fillStyle = r; g.fillRect(0, 0, 64, 4);
+  g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+  const v = g.getImageData(0, 0, 64, 64);  // sfuma anche in lunghezza
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const k = Math.min(1, Math.min(y, 63 - y) / 14); v.data[(y * 64 + x) * 4 + 3] *= k;
+  }
+  g.putImageData(v, 0, 0);
   return new T.CanvasTexture(c);
 }
-const HALO = radialTex(), STRIP = stripTex();
-function glowPlane(tex, w, l) {
+const HALO = radialTex(0.5), SOFT = radialTex(0.35), STRIP = stripTex();
+function glowPlane(tex, w, l, normal) {
   const m = new T.Mesh(new T.PlaneGeometry(w, l), new T.MeshBasicMaterial({
-    map: tex, transparent: true, depthWrite: false, opacity: 0, blending: LIGHT ? T.NormalBlending : T.AdditiveBlending }));
+    map: tex, transparent: true, depthWrite: false, opacity: 0, toneMapped: false,
+    blending: normal || LIGHT ? T.NormalBlending : T.AdditiveBlending }));
   m.rotation.x = -Math.PI / 2; m.position.y = 0.02;
   return m;
 }
-const zoneL = glowPlane(STRIP, 2.6, 10), zoneR = glowPlane(STRIP, 2.6, 10), zoneB = glowPlane(HALO, 2.6, 7);
+function shadowBlob(w, l) {  // ombra di contatto: morbida come nei render della Tesla
+  const m = new T.Mesh(new T.PlaneGeometry(w, l), new T.MeshBasicMaterial({
+    map: SOFT, color: 0x000000, transparent: true, depthWrite: false, opacity: LIGHT ? 0.35 : 0.75 }));
+  m.rotation.x = -Math.PI / 2; m.position.y = 0.015;
+  return m;
+}
+const zoneL = glowPlane(STRIP, 2.6, 11), zoneR = glowPlane(STRIP, 2.6, 11), zoneB = glowPlane(HALO, 2.8, 8);
 scene.add(zoneL, zoneR, zoneB);
 
 // ---------------------------------------------------------------- modellini
-// profilo laterale (lunghezza 0..1 dal retro al muso, altezza 0..1) estruso sulla larghezza con bordi arrotondati
-function extrude(pts, len, h, w, mat, bevel) {
-  const s = new T.Shape(pts.map(([u, v]) => new T.Vector2(u * len, v * h)));
-  const b = bevel != null ? bevel : Math.min(0.12, w * 0.12);
-  const g = new T.ExtrudeGeometry(s, { depth: Math.max(0.02, w - 2 * b), bevelEnabled: true, bevelThickness: b,
-    bevelSize: b, bevelSegments: 4, curveSegments: 8, steps: 1 });
+// profilo laterale in metri (z dal retro al muso, y in alto) estruso sulla larghezza con fianchi arrotondati
+function extrudeShape(shape, w, mat, bevel) {
+  const b = bevel != null ? bevel : Math.min(0.16, w * 0.1);
+  const g = new T.ExtrudeGeometry(shape, { depth: Math.max(0.02, w - 2 * b), bevelEnabled: true, bevelThickness: b,
+    bevelSize: b * 0.9, bevelSegments: 6, curveSegments: 14, steps: 1 });
   g.translate(0, 0, -(w - 2 * b) / 2);
   g.rotateY(-Math.PI / 2);  // lunghezza lungo +z (muso in avanti), larghezza lungo x
-  const m = new T.Mesh(g, mat); m.castShadow = true; m.receiveShadow = true;
-  return m;
+  g.computeVertexNormals();
+  return new T.Mesh(g, mat);
 }
-function smooth(pts, n) {  // arrotonda gli spigoli del profilo (Chaikin)
-  for (let k = 0; k < (n || 2); k++) {
-    const o = [];
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i], b = pts[(i + 1) % pts.length];
-      o.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]], [0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
-    }
-    pts = o;
+// sagoma liscia: spline chiusa sui punti di controllo, con i passaruota scavati nel fondo
+function bodyShape(pts, arches) {
+  const s = new T.Shape();
+  const curve = new T.SplineCurve(pts.map(([z, y]) => new T.Vector2(z, y)));
+  const cp = curve.getPoints(80);
+  s.moveTo(cp[0].x, cp[0].y);
+  for (const p of cp.slice(1)) s.lineTo(p.x, p.y);
+  // fondo: dal muso al retro passando sopra le ruote
+  const yb = pts[pts.length - 1][1];
+  for (const [zc, r] of arches) {
+    s.lineTo(zc + r + 0.06, yb);
+    s.absarc(zc, yb - 0.02, r + 0.06, 0, Math.PI, false);
   }
-  return pts;
+  s.lineTo(pts[0][0], yb);
+  s.closePath();
+  return s;
 }
-const P_BODY = smooth([[0, 0.18], [0, 0.5], [0.06, 0.58], [0.94, 0.55], [1, 0.42], [1, 0.18]]);
-const P_GLASS = smooth([[0.12, 0.5], [0.3, 0.97], [0.6, 1.0], [0.8, 0.52]], 2);
-const P_VAN = smooth([[0, 0.12], [0, 0.95], [0.04, 1], [0.8, 1], [0.97, 0.6], [1, 0.12]]);
-const P_CAB = smooth([[0, 0.1], [0, 1], [0.7, 1], [0.95, 0.75], [1, 0.1]]);
-const wheelGeo = new T.CylinderGeometry(1, 1, 1, 20); wheelGeo.rotateZ(Math.PI / 2);
-const wheelMat = new T.MeshStandardMaterial({ color: 0x24272c, roughness: 0.8 });
-
-function wheels(g, w, len, r, zs) {
-  for (const z of zs) for (const sx of [-1, 1]) {
-    const m = new T.Mesh(wheelGeo, wheelMat);
-    m.scale.set(0.24, r, r); m.position.set(sx * (w / 2 - 0.12), r, z * len); g.add(m);
-  }
-}
-function makeVehicle(cls, w, len, bodyMat, glassMat) {
+function wheel(r, wd, rimMat) {
   const g = new T.Group();
-  if (cls === "auto") {
-    const h = 1.45;
-    const b = extrude(P_BODY, len, h, w, bodyMat); g.add(b);
-    const gl = extrude(P_GLASS, len, h, w * 0.86, glassMat, 0.06); gl.position.y = 0; g.add(gl);
-    wheels(g, w, len, 0.33, [0.17, 0.8]);
-  } else if (cls === "furgone") {
-    g.add(extrude(P_VAN, len, 2.3, w, bodyMat));
-    const gl = extrude(smooth([[0.72, 0.55], [0.79, 0.97], [0.82, 0.97], [0.95, 0.62], [0.95, 0.55]], 1), len, 2.3, w * 1.01, glassMat, 0.02); g.add(gl);
-    wheels(g, w, len, 0.36, [0.15, 0.82]);
-  } else if (cls === "camion") {
-    const cab = Math.min(2.4, len * 0.25), box = len - cab - 0.3, h = 3.3;
-    g.add(extrude(smooth([[0, 0.1], [0, 1], [1, 1], [1, 0.1]], 1), box, h, w, bodyMat, 0.08));
-    const c = extrude(P_CAB, cab, h * 0.85, w * 0.97, bodyMat); c.position.z = box + 0.3; g.add(c);
-    const gl = extrude(smooth([[0.55, 0.6], [0.68, 0.95], [0.9, 0.78], [0.95, 0.6]], 1), cab, h * 0.85, w * 0.99, glassMat, 0.02);
-    gl.position.z = box + 0.3; g.add(gl);
-    wheels(g, w, len, 0.5, [0.1, 0.25, 0.88]);
-  } else if (cls === "bus") {
-    const h = 3.1;
-    g.add(extrude(P_VAN.map(([u, v]) => [u, v]), len, h, w, bodyMat));
-    const band = new T.Mesh(new T.BoxGeometry(w * 1.01, 0.8, len * 0.86), glassMat);
-    band.position.set(0, h * 0.68, len * 0.48); g.add(band);
-    wheels(g, w, len, 0.5, [0.18, 0.8]);
-  } else if (cls === "moto" || cls === "bici" || cls === "monopattino") {
-    const r = cls === "moto" ? 0.32 : cls === "bici" ? 0.34 : 0.12;
-    const tor = new T.TorusGeometry(r, cls === "moto" ? 0.09 : 0.035, 8, 24); tor.rotateY(Math.PI / 2);
-    for (const z of [r, len - r]) { const m = new T.Mesh(tor, wheelMat); m.position.set(0, r, z); m.castShadow = true; g.add(m); }
-    if (cls === "moto") { const b = extrude(smooth([[0.15, 0.3], [0.2, 0.75], [0.85, 0.85], [0.9, 0.35]]), len, 1.0, 0.36, bodyMat, 0.08); g.add(b); }
-    else { const f = new T.Mesh(new T.BoxGeometry(0.06, 0.06, len - 2 * r), bodyMat); f.position.set(0, r + 0.3, len / 2); g.add(f); }
-    // chi guida: busto e casco
-    const torso = new T.Mesh(new T.CapsuleGeometry(0.2, 0.45, 4, 10), bodyMat);
-    torso.position.set(0, cls === "monopattino" ? 1.2 : 1.05, len * 0.4); torso.rotation.x = cls === "monopattino" ? 0 : 0.35;
-    torso.castShadow = true; g.add(torso);
-    const head = new T.Mesh(new T.SphereGeometry(0.16, 16, 12), bodyMat === egoMat ? helmetMat : bodyMat);
-    head.position.set(0, torso.position.y + 0.5, len * 0.48); head.castShadow = true; g.add(head);
-  } else if (cls === "persona") {
-    const body = new T.Mesh(new T.CapsuleGeometry(0.22, 0.95, 4, 10), bodyMat); body.position.y = 0.72; body.castShadow = true; g.add(body);
-    const head = new T.Mesh(new T.SphereGeometry(0.14, 16, 12), bodyMat); head.position.y = 1.6; g.add(head);
-  } else {
-    g.add(extrude(smooth([[0, 0.1], [0, 1], [1, 1], [1, 0.1]], 1), len, 1.5, w, bodyMat));
+  const tire = new T.Mesh(new T.CylinderGeometry(r, r, wd, 28), tireMat); tire.rotation.z = Math.PI / 2; g.add(tire);
+  const rim = new T.Mesh(new T.CylinderGeometry(r * 0.62, r * 0.62, wd + 0.01, 24), rimMat); rim.rotation.z = Math.PI / 2; g.add(rim);
+  return g;
+}
+const tireMat = new T.MeshStandardMaterial({ color: 0x16181b, roughness: 0.85 });
+const rimDark = new T.MeshStandardMaterial({ color: 0x3a3f46, roughness: 0.35, metalness: 0.6 });
+
+// muso a destra (z grande), retro a z = 0. Punti in senso orario partendo dal fondo del retro.
+const SEDAN = (L, H) => [
+  [0.05, 0.32], [0.0, 0.48], [0.04, 0.7], [0.25, 0.88], [0.75, 0.95], [1.5, 0.97], [2.6, 0.97],
+  [3.3, 0.95], [3.7, 0.88], [4.25, 0.8], [L - 0.04, 0.62], [L, 0.42], [L - 0.06, 0.28],
+].map(([z, y]) => [z * L / 4.6, y * H / 1.45]);
+const SUV = (L, H) => [
+  [0.04, 0.34], [0.0, 0.6], [0.06, 1.05], [0.3, 1.12], [1.5, 1.14], [3.0, 1.14], [3.5, 1.12], [3.9, 1.06],
+  [4.4, 1.0], [L - 0.04, 0.82], [L, 0.5], [L - 0.06, 0.32],
+].map(([z, y]) => [z * L / 4.8, y * H / 1.75]);
+
+function car(kind, w, len, bodyMat, glassMat) {
+  const g = new T.Group();
+  const suv = kind === "furgone";
+  const H = suv ? 2.2 : 1.45, r = suv ? 0.38 : 0.34;
+  const zr = len * 0.19, zf = len * 0.8;
+  const body = extrudeShape(bodyShape(suv ? SUV(len, H) : SEDAN(len, H), [[zf, r], [zr, r]]), w, bodyMat, 0.18);
+  g.add(body);
+  // abitacolo scuro (vetri e tetto in vetro), più stretto della carrozzeria
+  const k = H / 1.45, kl = len / 4.6;
+  const gh = suv
+    ? [[0.2, 1.08], [0.3, 1.62], [0.65, 1.78], [2.6, 1.8], [3.2, 1.55], [3.6, 1.1]]
+    : [[0.45, 0.9 * k], [1.3, 1.2 * k], [1.85, 1.43 * k], [2.55, 1.45 * k], [3.06, 1.2 * k], [3.55, 0.92 * k]];
+  const gs = new T.Shape();
+  const gpts = new T.SplineCurve(gh.map(([z, y]) => new T.Vector2(z * (suv ? len / 4.8 : kl), y))).getPoints(40);
+  gs.moveTo(gpts[0].x, gpts[0].y - 0.05);
+  for (const p of gpts) gs.lineTo(p.x, p.y);
+  gs.lineTo(gpts[gpts.length - 1].x, gpts[gpts.length - 1].y - 0.05);
+  gs.closePath();
+  const glass = extrudeShape(gs, w * 0.84, glassMat, 0.1);
+  glass.position.y = 0.012;
+  g.add(glass);
+  for (const z of [zr, zf]) for (const sx of [-1, 1]) {
+    const wh = wheel(r, 0.26, rimDark); wh.position.set(sx * (w / 2 - 0.15), r, z); g.add(wh);
   }
   return g;
 }
+function truck(w, len, bodyMat, glassMat) {
+  const g = new T.Group(), h = 3.4, cab = Math.min(2.3, len * 0.24), box = len - cab - 0.25;
+  const rb = new T.Shape(); rb.moveTo(0, 0.55); rb.lineTo(0, h); rb.lineTo(box, h); rb.lineTo(box, 0.55); rb.closePath();
+  g.add(extrudeShape(rb, w, bodyMat, 0.12));
+  const cs = bodyShape([[0.02, 0.5], [0, 2.4], [0.1, 2.95], [cab * 0.75, 3.0], [cab - 0.08, 2.3], [cab, 1.4], [cab - 0.02, 0.5]], []);
+  const c = extrudeShape(cs, w * 0.98, bodyMat, 0.18); c.position.z = box + 0.25; g.add(c);
+  const ws = new T.Shape(); ws.moveTo(cab * 0.55, 1.75); ws.lineTo(cab * 0.6, 2.85); ws.lineTo(cab * 0.82, 2.85); ws.lineTo(cab - 0.06, 2.0); ws.lineTo(cab - 0.06, 1.75); ws.closePath();
+  const wsm = extrudeShape(ws, w * 1.0, glassMat, 0.04); wsm.position.z = box + 0.25; g.add(wsm);
+  for (const z of [0.9, 2.2, box + 0.25 + cab * 0.5]) for (const sx of [-1, 1]) {
+    const wh = wheel(0.5, 0.36, rimDark); wh.position.set(sx * (w / 2 - 0.2), 0.5, z); g.add(wh);
+  }
+  return g;
+}
+function bus(w, len, bodyMat, glassMat) {
+  const g = new T.Group(), h = 3.1;
+  const s = bodyShape([[0.03, 0.4], [0, 2.7], [0.15, h], [len - 0.4, h], [len - 0.05, 2.6], [len, 1.0], [len - 0.03, 0.4]], [[len * 0.8, 0.5], [len * 0.2, 0.5]]);
+  g.add(extrudeShape(s, w, bodyMat, 0.18));
+  const band = new T.Shape(); band.moveTo(0.4, 1.75); band.lineTo(0.4, 2.65); band.lineTo(len - 0.5, 2.65); band.lineTo(len - 0.2, 1.4); band.lineTo(len - 0.6, 1.75); band.closePath();
+  g.add(extrudeShape(band, w * 1.005, glassMat, 0.05));
+  for (const z of [len * 0.2, len * 0.8]) for (const sx of [-1, 1]) {
+    const wh = wheel(0.5, 0.34, rimDark); wh.position.set(sx * (w / 2 - 0.2), 0.5, z); g.add(wh);
+  }
+  return g;
+}
+function twoWheeler(kind, len, bodyMat, riderMat, headMat) {
+  const g = new T.Group();
+  const moto = kind === "moto", scoot = kind === "monopattino";
+  const r = moto ? 0.32 : scoot ? 0.11 : 0.34;
+  const tor = new T.TorusGeometry(r, moto ? 0.1 : 0.04, 10, 32); tor.rotateY(Math.PI / 2);
+  for (const z of [r, len - r]) { const m = new T.Mesh(tor, tireMat); m.position.set(0, r, z); g.add(m); }
+  const tube = (a, b, rad, mat) => {  // tubo del telaio da a a b
+    const va = new T.Vector3(...a), vb = new T.Vector3(...b), d = vb.clone().sub(va);
+    const m = new T.Mesh(new T.CylinderGeometry(rad, rad, d.length(), 10), mat);
+    m.position.copy(va).add(vb).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), d.normalize());
+    g.add(m);
+  };
+  let seatY, seatZ, barY, barZ;
+  if (moto) {
+    const s = bodyShape([[0.25, 0.45], [0.3, 0.8], [0.9, 0.95], [1.5, 1.05], [1.85, 0.75], [1.75, 0.45]], []);
+    g.add(extrudeShape(s, 0.42, bodyMat, 0.1));
+    seatY = 0.95; seatZ = 0.75; barY = 1.1; barZ = 1.55;
+  } else if (scoot) {
+    tube([0, r + 0.02, r], [0, r + 0.02, len - r], 0.05, bodyMat);
+    tube([0, r, len - r], [0, 1.05, len - r - 0.08], 0.025, bodyMat);
+    seatY = null; barY = 1.05; barZ = len - r - 0.08;
+  } else {
+    const bb = [0, r + 0.02, len * 0.42], seat = [0, r + 0.62, len * 0.36], head = [0, r + 0.6, len - r - 0.15];
+    tube([0, r, r], bb, 0.025, bodyMat); tube(bb, seat, 0.025, bodyMat); tube(seat, head, 0.025, bodyMat);
+    tube(bb, head, 0.025, bodyMat); tube(head, [0, r, len - r], 0.022, bodyMat); tube([0, r, r], seat, 0.02, bodyMat);
+    seatY = r + 0.66; seatZ = len * 0.36; barY = r + 0.72; barZ = len - r - 0.12;
+  }
+  // chi guida: busto inclinato, braccia al manubrio, casco
+  const hipY = scoot ? 1.0 : seatY + 0.05, hipZ = scoot ? len * 0.45 : seatZ;
+  const shZ = scoot ? hipZ + 0.08 : hipZ + (barZ - hipZ) * 0.45, shY = scoot ? 1.55 : hipY + 0.55;
+  const torso = new T.Mesh(new T.CapsuleGeometry(0.17, 0.42, 6, 14), riderMat);
+  const tv = new T.Vector3(0, shY - hipY, shZ - hipZ);
+  torso.position.set(0, (hipY + shY) / 2, (hipZ + shZ) / 2);
+  torso.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), tv.clone().normalize());
+  torso.scale.set(1.15, 1, 0.8);
+  g.add(torso);
+  for (const sx of [-1, 1]) {
+    tube([sx * 0.17, shY - 0.05, shZ], [sx * 0.22, barY, barZ], 0.05, riderMat);
+    if (!scoot) tube([sx * 0.11, hipY, hipZ], [sx * 0.12, r + 0.25, len * 0.45], 0.065, riderMat);
+    else tube([sx * 0.1, hipY, hipZ], [sx * 0.1, r + 0.05, hipZ], 0.065, riderMat);
+  }
+  tube([-0.25, barY, barZ], [0.25, barY, barZ], 0.018, bodyMat);
+  const head = new T.Mesh(new T.SphereGeometry(0.15, 24, 16), headMat);
+  head.scale.set(1, 0.95, 1.2);
+  head.position.set(0, shY + 0.2, shZ + 0.05);
+  g.add(head);
+  return g;
+}
+function person(mat) {
+  const g = new T.Group();
+  const b = new T.Mesh(new T.CapsuleGeometry(0.2, 0.9, 6, 14), mat); b.position.y = 0.7; b.scale.set(1.1, 1, 0.75); g.add(b);
+  const h = new T.Mesh(new T.SphereGeometry(0.13, 20, 14), mat); h.position.y = 1.58; g.add(h);
+  return g;
+}
+function makeVehicle(cls, w, len, bodyMat, glassMat, headMat) {
+  if (cls === "auto" || cls === "furgone") return car(cls, w, len, bodyMat, glassMat);
+  if (cls === "camion") return truck(w, len, bodyMat, glassMat);
+  if (cls === "bus") return bus(w, len, bodyMat, glassMat);
+  if (cls === "moto" || cls === "bici" || cls === "monopattino") return twoWheeler(cls, len, bodyMat, bodyMat, headMat || bodyMat);
+  if (cls === "persona") return person(bodyMat);
+  return car("auto", w, len, bodyMat, glassMat);
+}
 
-// il tuo mezzo: bianco, con i fanali posteriori e una luce rossa a terra quando frena il pericolo
-const egoMat = new T.MeshStandardMaterial({ color: C.ego, roughness: 0.35, metalness: 0.1 });
-const egoGlass = new T.MeshStandardMaterial({ color: 0x23272d, roughness: 0.2, metalness: 0.4 });
-const helmetMat = new T.MeshStandardMaterial({ color: 0x2fd27a, roughness: 0.4, emissive: 0x0b3a20 });
+// il tuo mezzo: bianco lucido, fanali posteriori accesi, luce a terra del colore del rischio
+const egoMat = new T.MeshPhysicalMaterial({ color: 0xf6f7f9, roughness: 0.28, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.12 });
+const egoGlass = new T.MeshPhysicalMaterial({ color: 0x15181c, roughness: 0.08, metalness: 0.2, clearcoat: 1 });
+const riderMat = new T.MeshStandardMaterial({ color: 0xe9ecef, roughness: 0.6 });
+const helmetMat = new T.MeshPhysicalMaterial({ color: 0x2fd27a, roughness: 0.25, clearcoat: 1, emissive: 0x0b3a20 });
+const tailMat = new T.MeshBasicMaterial({ color: 0xff2a2a, toneMapped: false });
 let ego = null, egoKind = "";
-const egoGlow = glowPlane(HALO, 3, 2.6); scene.add(egoGlow);
+const egoGlow = glowPlane(HALO, 3.2, 3); scene.add(egoGlow);
+const egoShadow = shadowBlob(1, 1); scene.add(egoShadow);
 function buildEgo(kind) {
   if (ego) scene.remove(ego);
   const [w, len] = EGO[kind] || EGO.bici;
-  ego = makeVehicle(kind === "bus" ? "bus" : kind, w, len, egoMat, egoGlass);
-  if (kind !== "bici" && kind !== "monopattino") {
-    const tl = new T.MeshBasicMaterial({ color: 0xff3030 });
+  const two = kind === "bici" || kind === "monopattino";
+  ego = two ? twoWheeler(kind, len, new T.MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.3, metalness: 0.6 }), riderMat, helmetMat)
+    : makeVehicle(kind, w, len, egoMat, egoGlass);
+  if (!two) {
+    const y = kind === "auto" ? 0.86 : kind === "furgone" ? 1.1 : 1.0;
     for (const sx of [-1, 1]) {
-      const m = new T.Mesh(new T.BoxGeometry(w * 0.22, 0.08, 0.04), tl);
-      m.position.set(sx * w * 0.32, kind === "auto" ? 0.72 : 1.0, -0.13); ego.add(m);
+      const m = new T.Mesh(new T.BoxGeometry(w * 0.26, 0.07, 0.05), tailMat);
+      m.position.set(sx * w * 0.3, y, -0.02); ego.add(m);
     }
+    const bar = new T.Mesh(new T.BoxGeometry(w * 0.5, 0.025, 0.05), tailMat); bar.position.set(0, y + 0.02, -0.02); ego.add(bar);
   }
-  if (kind === "bici" || kind === "monopattino") ego.scale.setScalar(1.35);  // un po' più grande, se no si perde
+  if (two) ego.scale.setScalar(1.35);  // un po' più grande, se no si perde
   scene.add(ego);
+  egoShadow.scale.set(w * (two ? 2.2 : 1.35), 1, len * 1.25); egoShadow.position.z = len / 2;
   egoKind = kind;
   buildRoad(w);
-  // telecamera dietro e sopra come sulla Tesla, più alta e lontana per i mezzi grandi
   setCam(w, len);
 }
 let camBase = null;
@@ -352,21 +465,26 @@ const zOf = (d) => (d <= 5 ? -d : -(5 + 5.5 * (1 - Math.exp(-(d - 5) / 10))));
 
 // ---------------------------------------------------------------- veicoli rilevati
 const objs = new Map();
+const glowSprite = new T.SpriteMaterial({ map: HALO, transparent: true, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false });
 function newObj(t) {
-  const body = new T.MeshStandardMaterial({ color: C.car, roughness: 0.55, metalness: 0.05, transparent: true });
-  const glass = new T.MeshStandardMaterial({ color: C.glass, roughness: 0.3, metalness: 0.2, transparent: true });
+  const body = new T.MeshPhysicalMaterial({ color: C.car, roughness: 0.45, metalness: 0.0, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.55, transparent: true });
+  const glass = new T.MeshPhysicalMaterial({ color: C.glass, roughness: 0.15, metalness: 0.2, transparent: true });
   const w = t.w || 1.8, len = t.len || 4.5;
   const g = makeVehicle(t.cls, w, len, body, glass);
-  const halo = glowPlane(HALO, w + 1.6, len + 1.6); halo.position.z = len / 2; g.add(halo);
+  const sh = shadowBlob(w * 1.45 + 0.3, len * 1.2 + 0.3); sh.position.z = len / 2; g.add(sh);
+  const halo = glowPlane(HALO, w + 2.2, len + 2.2); halo.position.z = len / 2; g.add(halo);
+  const spr = new T.Sprite(glowSprite.clone()); spr.material.opacity = 0;
+  spr.scale.set(w * 2.6, w * 2.0, 1); spr.position.set(0, 1.0, len / 2); g.add(spr);
   scene.add(g);
   const lab = document.createElement("div"); lab.className = "lab"; lab.style.display = "none"; $("labels").appendChild(lab);
-  return { g, body, glass, halo, lab, len, w, cls: t.cls, a: 0, x: null, z: null };
+  return { g, body, glass, halo, spr, sh, lab, len, w, cls: t.cls, a: 0, x: null, z: null };
 }
 function dropObj(id, o) { scene.remove(o.g); o.lab.remove(); objs.delete(id); }
 
 // l'ultrasuono vede qualcosa dietro che la camera non vede: sagoma neutra
 const ghostMat = new T.MeshStandardMaterial({ color: C.car, transparent: true, opacity: 0.35, roughness: 0.6 });
-const ghost = extrude(smooth([[0, 0.1], [0, 1], [1, 1], [1, 0.1]], 2), 1.4, 1.0, 1.2, ghostMat, 0.2);
+const gsh = new T.Shape(); gsh.moveTo(0, 0.1); gsh.lineTo(0, 0.9); gsh.lineTo(1.4, 0.9); gsh.lineTo(1.4, 0.1); gsh.closePath();
+const ghost = extrudeShape(gsh, 1.2, ghostMat, 0.25);
 scene.add(ghost); ghost.visible = false;
 
 const tmpV = new T.Vector3(), placed = [];
@@ -441,8 +559,10 @@ function frame(now) {
     o.body.color.lerp(col, Math.min(1, dt * 10));
     o.body.emissive.copy(lvl === 2 ? RISK[2] : new T.Color(0)).multiplyScalar(lvl === 2 ? 0.35 * pulse : 0);
     o.body.opacity = o.glass.opacity = o.a;
-    o.halo.material.opacity += ((lvl ? (lvl === 2 ? 0.45 * pulse : 0.3) : 0) - o.halo.material.opacity) * Math.min(1, dt * 8);
-    if (lvl) o.halo.material.color.copy(RISK[lvl]);
+    o.halo.material.opacity += ((lvl ? (lvl === 2 ? 0.55 * pulse : 0.35) : 0) - o.halo.material.opacity) * Math.min(1, dt * 8);
+    if (lvl) { o.halo.material.color.copy(RISK[lvl]); o.spr.material.color.copy(RISK[lvl]); }
+    o.spr.material.opacity += ((LIGHT ? 0 : lvl === 2 ? 0.55 * pulse : lvl ? 0.2 : 0) - o.spr.material.opacity) * Math.min(1, dt * 8);
+    o.sh.material.opacity = (LIGHT ? 0.35 : 0.75) * o.a;
     // etichetta: tempo all'impatto e distanza laterale o dietro
     const parts = [];
     if (lvl && t.ttc != null && t.ttc >= 0 && t.ttc < 30) parts.push(t.ttc.toFixed(1).replace(".", ",") + " s");
@@ -496,7 +616,7 @@ function hud(now, conn, z, scale, kind) {
   } else if (!S.cam_ok) { msg.className = "l1"; msg.textContent = "Camera assente"; sub = "solo ultrasuono"; }
   else { msg.className = "ok"; msg.textContent = "Strada libera"; }
   $("sub").textContent = sub;
-  $("edge").style.opacity = conn && max === 2 ? 0.7 : 0;
+  $("edge").style.opacity = conn && max === 2 ? 0.55 : 0;
 
   if (conn && max > prevMax && navigator.vibrate) navigator.vibrate(max === 2 ? [120, 60, 120] : 60);
   if (conn && max === 2 && audio && now > beepAt) { beep(z.B === 2 ? 1500 : 2400); beepAt = now + 320; }
