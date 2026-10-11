@@ -1,24 +1,21 @@
 import json
 
-CLASSES = {"none": 0, "person": 1, "bicycle": 2, "car": 3}
-OTHER = 4  # any other detector class (truck, bus, motorcycle...) still shows up
-SIDES = {"L": 0, "C": 1, "R": 2}
+ZONES = ("L", "C", "R")  # rider's left, behind, right
 
 
 def parse(data):
-    """UDP payload -> (class_idx, side_idx), or None if invalid."""
+    """One JSON line from the Pi -> (L, C, R) with 1 = zone red, or None if invalid."""
     try:
         msg = json.loads(data)
-        cls = CLASSES.get(msg["cls"], OTHER)
-        return cls, (SIDES[msg["side"]] if cls else 0)
+        return tuple(1 if msg[z] else 0 for z in ZONES)
     except (ValueError, KeyError, TypeError):
         return None
 
 
 if __name__ == "__main__":
-    assert parse(b'{"seq":1,"cls":"car","side":"R"}') == (3, 2)
-    assert parse(b'{"seq":1,"cls":"none"}') == (0, 0)
-    assert parse(b'{"cls":"truck","side":"L"}') == (OTHER, 0)
-    for bad in (b"x", b"[]", b'"s"', b'{"cls":"car"}', b'{"cls":"car","side":"X"}', b"\xff"):
+    assert parse(b'{"seq":1,"L":1,"C":0,"R":0}') == (1, 0, 0)
+    assert parse(b'{"seq":2,"L":1,"C":1,"R":1}') == (1, 1, 1)
+    assert parse(b'{"L":0,"C":0,"R":2}') == (0, 0, 1)
+    for bad in (b"x", b"[]", b'"s"', b'{"L":1,"C":0}', b'{"cls":"car","side":"R"}', b"\xff"):
         assert parse(bad) is None, bad
     print("ok")

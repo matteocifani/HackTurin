@@ -2,3 +2,7 @@
 *.zip
 .DS_Store
 __pycache__/
+pi/*_ncnn_model/
+pi/*.pt
+pi/logs/
+pi/casco_ip.txt

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guardaspalle test</title>
+<style>
+  :root { --bg: #05070a; --panel: #0d1218; --fg: #e8edf2; --muted: #7d8896;
+    --green: #2fd27a; --amber: #ffb020; --red: #ff3b3b; --blue: #4aa3ff; --violet: #c792ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #wrap { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; }
+  #video { flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  #video img { width: 100%; display: block; border-radius: 10px; background: #000; min-height: 200px; }
+  #side { flex: 1 1 360px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .panel { background: var(--panel); border-radius: 10px; padding: 12px 14px; }
+  .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .small { font-size: 13px; color: var(--muted); }
+  #cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .card { background: var(--panel); border-radius: 10px; padding: 10px 12px; border-top: 4px solid #1a222c; }
+  .card .v { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .card .s { font-size: 12.5px; color: var(--muted); min-height: 2.6em; }
+  .card.cam { border-top-color: var(--blue); } .card.us { border-top-color: var(--green); }
+  .card.fus { border-top-color: var(--violet); }
+  .v.near { color: var(--red); } .v.mid { color: var(--amber); } .v.far { color: var(--fg); } .v.none { color: var(--muted); font-size: 20px; }
+  #verdict { font-size: 17px; font-weight: 600; }
+  canvas { width: 100%; height: 170px; display: block; }
+  .leg { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .leg i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  td, th { padding: 4px 2px; text-align: left; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .stats b { font-size: 18px; }
+  button { background: #1a222c; color: var(--fg); border: 0; border-radius: 6px; padding: 5px 10px; font-size: 13px; }
+  @media (max-width: 520px) { .card .v { font-size: 24px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="video">
+    <img src="/video.mjpg" alt="video webcam con bounding box"
+         onerror="this.alt='Nessun video: avvia bike_adas.py con --stream'">
+    <div class="panel">
+      <div class="lbl" id="histlbl">Ultimi 20 s</div>
+      <canvas id="hist"></canvas>
+      <div class="leg"><span><i style="background:var(--blue)"></i>camera</span>
+        <span><i style="background:var(--green)"></i>ultrasuono</span>
+        <span><i style="background:var(--violet)"></i>fusione</span></div>
+    </div>
+  </div>
+  <div id="side">
+    <div id="cards">
+      <div class="card cam"><div class="lbl">Camera</div><div class="v none" id="camv">…</div><div class="s" id="cams"></div></div>
+      <div class="card us"><div class="lbl">Ultrasuono</div><div class="v none" id="usv">…</div><div class="s" id="uss"></div></div>
+      <div class="card fus"><div class="lbl">Fusione</div><div class="v none" id="fusv">…</div><div class="s" id="fuss"></div></div>
+    </div>
+    <div class="panel">
+      <div class="lbl">Cosa sta succedendo</div>
+      <div id="verdict">…</div>
+      <div class="small" id="why"></div>
+    </div>
+    <div class="panel">
+      <div class="lbl">Velocità di avvicinamento</div>
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+        <div id="vv" class="v" style="font-size:34px;font-weight:800;font-variant-numeric:tabular-nums">-</div>
+        <div id="vreal" style="font-size:17px;font-weight:600"></div>
+      </div>
+      <div class="small" id="vsub"></div>
+    </div>
+    <div class="panel">
+      <div class="lbl">Camera contro ultrasuono (quando l'ultrasuono è affidabile)</div>
+      <div class="stats">
+        <div>Errore medio camera<br><b id="mae">-</b></div>
+        <div>Misure in coppia<br><b id="npairs">0</b></div>
+        <div>Correzione residua (US / camera)<br><b id="ratio">-</b></div>
+        <div>Anticipo della camera<br><b id="lead">-</b></div>
+        <div>Calibrazione automatica camera<br><b id="calk">-</b></div>
+        <div>Modello<br><b id="model" style="font-size:14px">-</b></div>
+      </div>
+      <div class="small" style="margin-top:6px">Calibrazione = quando camera e ultrasuono vedono lo stesso oggetto
+        dove l'ultrasuono è affidabile, la Pi corregge da sola la distanza della camera (la salva per il prossimo avvio).
+        Anticipo = quanto prima la camera ha visto arrivare l'oggetto rispetto all'ultrasuono, nell'ultimo avvicinamento.
+        <button id="reset">azzera</button></div>
+    </div>
+    <div class="panel">
+      <div class="lbl">Rilevamenti camera</div>
+      <table><thead><tr><th>id</th><th>classe</th><th>dist.</th><th>lato</th><th>TTC</th></tr></thead><tbody id="dets"></tbody></table>
+      <div class="small" id="cam"></div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let RED = 150, AMBER = 250, TRUST = 40, BLEND = 20, HMAX = 5;
+const hist = [];  // [t, cam_m|null, us_m|null, fus_m|null]
+let pairs = [], approach = null, lastLead = null;
+
+$("reset").onclick = () => { pairs = []; lastLead = null; approach = null; };
+
+const cls = cm => cm == null ? "none" : cm < RED ? "near" : cm < AMBER ? "mid" : "far";
+const fmt = m => m == null ? "-" : m < 10 ? (m * 100).toFixed(0) + " cm" : m.toFixed(0) + " m";
+
+function setCard(id, m, text) {
+  const v = $(id + "v");
+  v.className = "v " + (m == null ? "none" : cls(m * 100));
+  v.textContent = m == null ? text : fmt(m);
+}
+
+async function tick() {
+  let S;
+  try {
+    const r = await fetch("/state", { cache: "no-store" });
+    S = await r.json();
+  } catch (e) {
+    $("verdict").textContent = "Pi non raggiungibile";
+    return;
+  }
+  const now = Date.now() / 1000;
+  if (S.near_red != null) { RED = S.near_red; AMBER = S.near_amber; }
+  if (S.us_trust != null) { TRUST = S.us_trust; BLEND = S.us_blend; }
+  HMAX = Math.max(0.5, Math.min(5, Math.ceil(AMBER * 2 / 10) / 10));
+  $("histlbl").textContent = `Ultimi 20 s (0 – ${HMAX <= 2 ? Math.round(HMAX * 100) + " cm" : HMAX + " m"})`;
+
+  // camera: l'oggetto più vicino in linea dietro la bici (zona B)
+  const inLine = (S.tracks || []).filter(t => t.d != null && (t.zone === "B" || (t.zone == null && Math.abs(t.lat) <= 1.2)))
+    .sort((a, b) => a.d - b.d);
+  const ct = S.cam_ok ? inLine[0] : null;
+  const camM = ct ? ct.d : null;
+  setCard("cam", camM, S.cam_ok ? "niente in linea" : "camera ferma");
+  $("cams").textContent = ct ? `${ct.cls}${ct.conf != null ? " " + Math.round(ct.conf * 100) + "%" : ""}${ct.ttc != null ? " · TTC " + ct.ttc + " s" : ""} · dalla larghezza` +
+    (S.cal && S.cal.on && S.cal.k !== 1 ? `, calibrata ×${S.cal.k.toFixed(2)}` : "") +
+    (S.scale && S.scale !== 1 ? ` (scala ${S.scale})` : "") : `${S.fps} fps · ${(S.tracks || []).length} oggetti visti`;
+
+  // ultrasuono
+  const usM = S.has_us && S.us_cm != null ? S.us_cm / 100 : null;
+  setCard("us", usM, S.has_us ? "niente entro 4 m" : "non attivo");
+  $("uss").textContent = !S.has_us ? "avvia con --us-trig 23 --us-echo 24" :
+    `lato ${S.us_side}${S.us_side !== "B" ? " (serve --us-side B)" : ""} · affidabile sotto ${TRUST} cm · ` +
+    `${S.us_age != null ? Math.round(S.us_age * 1000) + " ms fa" : "nessuna lettura"}`;
+
+  // fusione: la calcola la Pi (sotto TRUST cm vale l'ultrasuono, sopra TRUST+BLEND la camera, in mezzo una media pesata)
+  let fusM = null, src = "", verdict, why;
+  const F = S.fused;
+  if (F && F.w_us != null && usM != null && camM != null) {
+    fusM = F.cm / 100;
+    const pu = Math.round(F.w_us * 100);
+    src = `${pu}% ultrasuono, ${100 - pu}% camera`;
+    verdict = pu === 100 ? "Vicino: comanda l'ultrasuono" : pu === 0 ? "Lontano: comanda la camera" : "Zona di passaggio tra i due";
+    why = `${ct.cls}: camera ${fmt(camM)}, ultrasuono ${fmt(usM)}. ` +
+      (pu === 100 ? `Sotto ${TRUST} cm l'ultrasuono è il più preciso.` :
+       pu === 0 ? `Sopra ${TRUST + BLEND} cm l'ultrasuono è instabile, vale la stima della camera.` :
+       `Tra ${TRUST} e ${TRUST + BLEND} cm i due si mescolano, così il valore non salta.`);
+  } else if (usM != null) {
+    fusM = F ? F.cm / 100 : usM; src = "solo ultrasuono";
+    verdict = "Solo l'ultrasuono vede qualcosa";
+    why = (usM * 100 > TRUST + BLEND ? `Attenzione: sopra ${TRUST} cm la sua misura è poco affidabile. ` : "") +
+      "La camera non riconosce l'oggetto (una scatola non è un veicolo per YOLO, oppure è buio o troppo vicino).";
+  } else if (camM != null) {
+    fusM = F ? F.cm / 100 : camM; src = "solo camera";
+    verdict = "Solo la camera vede qualcosa";
+    why = "È fuori dal cono o dalla portata dell'ultrasuono: avvisa la camera, con anticipo.";
+  } else {
+    verdict = "Strada libera"; why = "Nessuno dei due vede niente dietro.";
+  }
+  setCard("fus", fusM, "libero");
+
+  // velocità: la stima la Pi dalla pendenza della distanza nel tempo (stesso orologio per camera e ultrasuono)
+  const fv = F ? F.v_cms : null;
+  const sp = v => v == null ? "-" : `${v > 0 ? "" : "−"}${Math.abs(v).toFixed(0)} cm/s`;
+  $("vv").textContent = fv == null ? "-" : sp(fv);
+  $("vv").style.color = fv == null ? "var(--muted)" : fv > 1 ? "var(--fg)" : "var(--muted)";
+  $("vreal").textContent = F && F.kmh_real != null && fv > 1 ?
+    (S.scale && S.scale !== 1 ? `≈ ${F.kmh_real.toFixed(0)} km/h in scala reale (1:${Math.round(1 / S.scale)})` : `${F.kmh_real.toFixed(1)} km/h`) : "";
+  $("vsub").textContent = !F ? "serve --us-side B" :
+    `camera ${sp(F.v_cam)} · ultrasuono ${sp(F.v_us)}` + (F.ttc != null ? ` · impatto tra ${F.ttc} s` : "") +
+    (fv != null && fv <= 1 ? " · non si avvicina" : "");
+  const zb = S.zones ? S.zones.B : 0;
+  $("fuss").textContent = (src ? src + " · " : "") + "casco: " + ["verde", "ambra", "rosso"][zb || 0];
+  $("verdict").textContent = verdict; $("why").textContent = why;
+
+  // coppie per misurare l'errore della camera
+  if (usM != null && camM != null && usM * 100 <= TRUST) {  // l'ultrasuono fa da riferimento solo dove è preciso
+    pairs.push([camM, usM]);
+    if (pairs.length > 500) pairs.shift();
+  }
+  if (pairs.length) {
+    const mae = pairs.reduce((s, p) => s + Math.abs(p[0] - p[1]), 0) / pairs.length;
+    const rs = pairs.map(p => p[1] / p[0]).sort((a, b) => a - b);
+    $("mae").textContent = fmt(mae);
+    $("ratio").textContent = "× " + rs[rs.length >> 1].toFixed(2);
+  } else { $("mae").textContent = "-"; $("ratio").textContent = "-"; }
+  $("npairs").textContent = pairs.length;
+  $("calk").textContent = !S.cal || !S.cal.on ? "spenta" : S.cal.n < 8 && S.cal.k === 1 ? `in attesa (${S.cal.n}/8)` :
+    `× ${S.cal.k.toFixed(2)} (${S.cal.n} misure)`;
+  $("model").textContent = S.model ? `${S.model.replace("_ncnn_model", "")} · ${S.fps} fps` : S.mode;
+
+  // anticipo: da quando la camera vede l'oggetto in linea a quando entra nella portata dell'ultrasuono
+  if (camM != null) {
+    if (!approach) approach = { t: now, us: null };
+    if (usM != null && approach.us == null) { approach.us = now; lastLead = now - approach.t; }
+  } else if (usM == null) approach = null;
+  $("lead").textContent = lastLead == null ? "-" : lastLead.toFixed(1) + " s";
+
+  hist.push([now, camM, usM, fusM]);
+  while (hist.length && now - hist[0][0] > 20) hist.shift();
+  drawHist(now);
+
+  const rows = (S.tracks || []).map(t =>
+    `<tr><td>${t.id}</td><td>${t.cls}${t.conf != null ? " " + Math.round(t.conf * 100) + "%" : ""}</td><td>${fmt(t.d)}</td>` +
+    `<td>${t.lat != null ? (t.zone === "B" ? "in linea" : t.lat > 0 ? "sinistra" : "destra") : "-"}</td>` +
+    `<td>${t.ttc != null ? t.ttc + " s" : "-"}</td></tr>`);
+  $("dets").innerHTML = rows.join("") || `<tr><td colspan="5" class="small">nessun veicolo/persona</td></tr>`;
+  $("cam").textContent = `${S.mode} · ${S.fps} fps · ritardo ${S.lat_ms} ms${S.cam_ok ? "" : " · CAMERA FERMA"}`;
+}
+
+function drawHist(now) {
+  const c = $("hist"), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  const g = c.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const Y = m => h - Math.min(HMAX, m) / HMAX * h;
+  g.fillStyle = "rgba(255,59,59,.10)"; g.fillRect(0, Y(RED / 100), w, h - Y(RED / 100));
+  g.fillStyle = "rgba(255,176,32,.07)"; g.fillRect(0, Y(AMBER / 100), w, Y(RED / 100) - Y(AMBER / 100));
+  g.strokeStyle = "#1a222c"; g.lineWidth = 1; g.fillStyle = "#7d8896"; g.font = "10px system-ui";
+  const step = HMAX <= 1 ? 0.1 : HMAX <= 2 ? 0.5 : 1;
+  for (let m = step; m < HMAX - 1e-6; m += step) {
+    g.beginPath(); g.moveTo(0, Y(m)); g.lineTo(w, Y(m)); g.stroke();
+    g.fillText(HMAX <= 2 ? Math.round(m * 100) + " cm" : m + " m", 2, Y(m) - 2);
+  }
+  g.strokeStyle = "#2fd27a"; g.setLineDash([2, 4]); g.beginPath(); g.moveTo(0, Y(TRUST / 100)); g.lineTo(w, Y(TRUST / 100)); g.stroke();
+  g.setLineDash([]); g.fillStyle = "#2fd27a"; g.fillText("sotto: ultrasuono", w - 90, Y(TRUST / 100) - 3);
+  const line = (k, col, width, dash) => {
+    g.strokeStyle = col; g.lineWidth = width; g.setLineDash(dash); g.beginPath();
+    let pen = false;
+    for (const p of hist) {
+      const x = w - (now - p[0]) / 20 * w, v = p[k];
+      if (v == null || v > HMAX) { pen = false; continue; }
+      pen ? g.lineTo(x, Y(v)) : g.moveTo(x, Y(v)); pen = true;
+    }
+    g.stroke(); g.setLineDash([]);
+  };
+  line(3, "#c792ff", 6, []);
+  line(1, "#4aa3ff", 2, []);
+  line(2, "#2fd27a", 2, [5, 3]);
+}
+
+setInterval(tick, 150);
+tick();
+</script>
+</body>
+</html>

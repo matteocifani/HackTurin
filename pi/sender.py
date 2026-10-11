@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake detector: sends one JSON line per message over TCP at 10 Hz, looping through test cases.
+"""Fake detector: sends one JSON line {"seq","L","C","R"} over TCP at 10 Hz, looping through test cases.
 
 usage: sender.py <uno-q-host-or-ip> [port]      e.g.  sender.py Aaaaaa.local
 Reconnects by itself if the UNO Q app restarts. Ctrl-C stops it; the silence
@@ -10,9 +10,8 @@ import json, socket, sys, time
 target = sys.argv[1]
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 5005
 
-# (cls, side, seconds); cls None = send nothing, to test link lost
-STEPS = [("none", "C", 3), ("car", "R", 3), ("car", "C", 3), ("car", "L", 3),
-         ("person", "L", 3), ("bicycle", "C", 3), ("truck", "R", 3), (None, None, 4)]
+# (zones red, seconds); None = send nothing, to test link lost (blinking amber after ~1.5 s)
+STEPS = [("", 3), ("L", 3), ("C", 3), ("R", 3), ("LCR", 3), ("LR", 3), (None, 4)]
 
 
 def connect():
@@ -32,12 +31,12 @@ sock = connect()
 seq = 0
 last_log = 0.0
 while True:
-    for cls, side, secs in STEPS:
-        print(cls or "silence", side or "")
+    for red, secs in STEPS:
+        print("silence" if red is None else "red: " + (red or "none"))
         end = time.monotonic() + secs
         while time.monotonic() < end:
-            if cls:
-                msg = {"seq": seq, "cls": cls, "side": side}
+            if red is not None:
+                msg = {"seq": seq, **{z: int(z in red) for z in "LCR"}}
                 try:
                     sock.sendall((json.dumps(msg) + "\n").encode())
                     seq += 1

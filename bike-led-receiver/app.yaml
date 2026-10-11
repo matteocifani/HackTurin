@@ -1,4 +1,4 @@
 name: Bike LED receiver
 icon: 🚲
-description: Receives detections over TCP from the Raspberry Pi and shows class (colour) and side on the helmet LED strip.
+description: Receives proximity zones (left, behind, right) over TCP from the Raspberry Pi and lights them red on the helmet LED strip.
 ports: [5005]

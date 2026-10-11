@@ -12,7 +12,7 @@
 
 // --- Calibration knobs ---
 #define LED_PIN     A0     // strip data-in pin: check against your wiring
-#define NUM_LEDS    30     // TODO: set the real LED count
+#define NUM_LEDS    30
 #define BRIGHTNESS  40     // 0-255; the strip is powered by the board, keep it low
 #define FLIP_SIDES  false  // true if the strip's first LED sits on the rider's right
 #define WATCHDOG_MS 3000   // no set_state call for this long -> link lost
@@ -24,21 +24,18 @@ Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 // =====================================================================
 // LED receiver (Pi -> Python -> set_state)
 // =====================================================================
-const uint8_t LOST = 255;
-const uint8_t DEBUG_ALL_RED = 254;  // must match DEBUG in python/main.py
-// index = class sent by Python: none, person, bicycle, car, other
-const uint32_t COLORS[] = {0x000000, 0x00FF00, 0x0000FF, 0xFF0000, 0xFFFFFF};
+const uint8_t LOST = 255;  // must match LOST in python/main.py
+// mask sent by Python: bit 0 = rider's left, bit 1 = behind, bit 2 = right; set bit = vehicle close, zone red
+const uint32_t NEAR_COLOR = 0xFF0000;
 const uint32_t LOST_COLOR = 0xFF4000;  // blinking amber: "no data", not "road clear"
 
-volatile uint8_t cls = LOST;
-volatile uint8_t side = 0;
+volatile uint8_t mask = LOST;
 volatile uint32_t lastCall = 0;
 volatile uint32_t calls = 0;
 
 // Runs in the Bridge thread: only store, never draw or log here
-void set_state(int c, int s) {
-  cls = c;
-  side = s;
+void set_state(int m) {
+  mask = m;
   lastCall = millis();
   calls++;
 }
@@ -46,20 +43,17 @@ void set_state(int c, int s) {
 uint32_t lastKey = 0xFFFFFFFF;
 
 void ledStep() {
-  uint8_t c = cls, s = side;
-  if (millis() - lastCall > WATCHDOG_MS) c = LOST;
-  bool blink = (c == LOST) && ((millis() / 500) % 2);
+  uint8_t m = mask;
+  if (millis() - lastCall > WATCHDOG_MS) m = LOST;
+  bool blink = (m == LOST) && ((millis() / 500) % 2);
 
   // log on state change (not on blink) and a heartbeat every 5 s
-  static uint8_t logC = 0xFD, logS = 0xFD;
+  static uint16_t logM = 0xFFFF;
   static uint32_t lastBeat = 0;
-  if (c != logC || s != logS) {
-    logC = c;
-    logS = s;
-    Monitor.print("state cls=");
-    Monitor.print(c);
-    Monitor.print(" side=");
-    Monitor.println(s);
+  if (m != logM) {
+    logM = m;
+    Monitor.print("state mask=");
+    Monitor.println(m);
   }
   if (millis() - lastBeat > 5000) {
     lastBeat = millis();
@@ -71,19 +65,20 @@ void ledStep() {
 
 #if USE_STRIP
   // show() blocks interrupts: redraw only when the picture changes
-  uint32_t key = ((uint32_t)c << 16) | ((uint32_t)s << 8) | blink;
+  uint32_t key = ((uint32_t)m << 8) | blink;
   if (key != lastKey) {
     lastKey = key;
     strip.clear();
-    if (c == LOST) {
+    if (m == LOST) {
       if (blink) strip.fill(LOST_COLOR);
-    } else if (c == DEBUG_ALL_RED) {
-      strip.fill(0xFF0000);  // troubleshooting: Python saw a UDP packet
-    } else if (c < sizeof(COLORS) / sizeof(COLORS[0])) {
-      if (FLIP_SIDES) s = 2 - s;
-      // three (nearly) equal thirds; boundaries rounded so every LED is covered
-      uint16_t from = s * NUM_LEDS / 3;
-      strip.fill(COLORS[c], from, (s + 1) * NUM_LEDS / 3 - from);
+    } else {
+      for (uint8_t z = 0; z < 3; z++) {
+        if (!(m & (1 << z))) continue;
+        uint8_t s = FLIP_SIDES ? 2 - z : z;
+        // three (nearly) equal thirds; boundaries rounded so every LED is covered
+        uint16_t from = s * NUM_LEDS / 3;
+        strip.fill(NEAR_COLOR, from, (s + 1) * NUM_LEDS / 3 - from);
+      }
     }
     strip.show();
   }

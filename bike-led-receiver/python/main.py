@@ -9,9 +9,7 @@ from protocol import parse
 PORT = 5005  # TCP: the app container only publishes TCP ports (ports: in app.yaml)
 LINK_TIMEOUT = 1.5  # s without a valid message -> link lost
 REFRESH = 1.0       # resend the state so the sketch watchdog stays fed
-LOST = 255
-DEBUG = 254
-DEBUG_RED = True  # troubleshooting: ANY message -> whole strip red (amber = nothing received)
+LOST = 255  # mask value for "no data": the sketch blinks amber
 
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -20,14 +18,14 @@ srv.listen(1)
 
 conn = None  # the Pi's connection; a new one replaces it (Pi rebooted, half-open socket)
 buf = b""
-state = (LOST, 0)
+state = LOST
 last_rx = float("-inf")  # nothing received yet == link lost
 sent = None
 last_sent = 0.0
 rx = bad = 0
 last_addr = None
 last_log = 0.0
-print("listening on TCP", PORT, "DEBUG_RED", DEBUG_RED)
+print("listening on TCP", PORT)
 
 
 def on_alert(kind, value, ms):
@@ -90,19 +88,18 @@ def loop():
         else:
             bad += 1
             print("bad message", data[:60])
-        if DEBUG_RED:
-            state, last_rx = (DEBUG, 0), time.monotonic()
-        elif parsed:
-            state, last_rx = parsed, time.monotonic()
+        if parsed:
+            left, centre, right = parsed
+            state, last_rx = left | centre << 1 | right << 2, time.monotonic()
     now = time.monotonic()
-    cur = state if now - last_rx < LINK_TIMEOUT else (LOST, 0)
+    cur = state if now - last_rx < LINK_TIMEOUT else LOST
     if now - last_log > 5:  # heartbeat: shows whether messages arrive at all
         last_log = now
         print("heartbeat rx", rx, "bad", bad, "last_from", last_addr, "state", cur)
     if cur != sent or now - last_sent > REFRESH:
         try:
             # short timeout: the default 10 s would freeze reception on every failure
-            Bridge.call("set_state", *cur, timeout=2)
+            Bridge.call("set_state", cur, timeout=2)
             if cur != sent:
                 print("state", cur)
             sent, last_sent = cur, now
