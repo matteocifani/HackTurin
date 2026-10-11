@@ -14,6 +14,7 @@ Sistema che guarda la strada **dietro al ciclista** e lo avvisa quando arriva un
 | [`codice/helmet_unoq/`](codice/helmet_unoq/) | **Casco** con Arduino UNO Q: sketch per il microcontrollore e script Python lato Linux. |
 | [`codice/bike_arduino_uno/`](codice/bike_arduino_uno/) | Riserva: HC-SR04 letto da un Arduino UNO collegato in USB al Pi. |
 | [`codice/bike_unoq/`](codice/bike_unoq/) | Piano B: tutto sulla UNO Q montata sulla bici, senza Raspberry. |
+| [`codice/training/`](codice/training/) | Addestramento del modello `gs26n` sui video da camera posteriore. |
 | [`codice/docs/`](codice/docs/) | Immagini per la documentazione. |
 | [`analisi-e-idee/`](analisi-e-idee/) | Ricerche, idee valutate e scartate, ragionamenti che hanno portato a questo progetto. |
 
@@ -23,7 +24,10 @@ Sistema che guarda la strada **dietro al ciclista** e lo avvisa quando arriva un
 - Ambiente Python in `~/gs`, con `include-system-site-packages = true` in `~/gs/pyvenv.cfg` (serve per `gpiozero`/`lgpio` di sistema).
 - Servizio `guardaspalle.service`: `bike_adas.py --source 0 --us-trig 23 --us-echo 24 --us-side B --clips --stream`.
 - HC-SR04 collegato direttamente ai GPIO del Pi a 3,3 V: VCC pin 1, GND pin 6, TRIG pin 16 (GPIO23), ECHO pin 18 (GPIO24).
-- I modelli YOLO esportati (`yolo26n_192x480_ncnn_model/`, `yolo26n_256x640_ncnn_model/`, ~9 MB l'uno) non sono nel repository. Si rigenerano da soli al primo avvio di `bike_adas.py` (scarica `yolo26n.pt` ed esporta in NCNN con la dimensione indicata nel nome), oppure a mano: `yolo export model=yolo26n.pt format=ncnn imgsz=192,480`.
+- Il modello predefinito è `gs26n`, YOLO26n addestrato da noi su video da camera posteriore. I pesi sono in [`codice/training/gs26n.pt`](codice/training/gs26n.pt) (5 MB). La versione NCNN usata sul Pi (`perception/gs26n_192x480_ncnn_model/`) non è nel repository: si rigenera con
+  `cd codice && python -c "from ultralytics import YOLO; YOLO('training/gs26n.pt').export(format='ncnn', imgsz=(192, 480))" && mv training/gs26n_ncnn_model perception/gs26n_192x480_ncnn_model`.
+  Se manca, `bike_adas.py` usa da solo YOLO26n originale (`yolo26n_192x480_ncnn_model`, scaricato ed esportato al primo avvio).
+- [`codice/training/`](codice/training/) contiene gli script di addestramento (`label.py` etichetta i video con un modello grande, `static_filter.py` toglie i fotogrammi fermi, `train.py` addestra, `val.py` valuta). I percorsi del dataset sono quelli della macchina dove è stato addestrato: vanno adattati.
 - Dashboard su `http://<ip-pi>:8000`, confronto camera/ultrasuono su `/test`.
 
 Il token Telegram va in una variabile d'ambiente (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`), mai nel repository.

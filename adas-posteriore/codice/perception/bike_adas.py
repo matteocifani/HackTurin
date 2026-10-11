@@ -2,7 +2,8 @@
 """
 Guardaspalle - il "cuore" sulla bici (Raspberry Pi 4).
 
-Webcam posteriore -> YOLO26n (NCNN, ingresso rettangolare 192x480) + ByteTrack -> per ogni veicolo:
+Webcam posteriore -> YOLO26n addestrato su video da camera posteriore (gs26n, NCNN 192x480)
+  + coppie di fari di notte (fari.py) + ByteTrack -> per ogni veicolo:
   tempo all'impatto (TTC) dalla crescita del riquadro, posizione laterale,
   distanza di sorpasso prevista -> rischio per zona (SX / DIETRO / DX).
 HC-SR04 a sinistra -> distanza reale di sorpasso (verifica la previsione).
@@ -72,7 +73,7 @@ def parse_args():
     g.add_argument("--realtime", action="store_true", help="file video alla velocità reale (salta fotogrammi)")
     g.add_argument("--loop", action="store_true", help="ripeti il file video")
     g = p.add_argument_group("modello")
-    g.add_argument("--model", default="yolo26n_192x480_ncnn_model",
+    g.add_argument("--model", default="gs26n_192x480_ncnn_model",
                    help="cartella NCNN <modello>_<alto>x<largo>_ncnn_model (se manca la crea da <modello>.pt) o .pt")
     g.add_argument("--imgsz", default=None, help="es. 320 o 192,480; se omesso lo legge dal modello NCNN")
     g.add_argument("--conf", type=float, default=0.25, help="confidenza per agganciare un riquadro (ByteTrack)")
@@ -962,6 +963,10 @@ class Detector:
         path = a.model
         if not os.path.isabs(path) and not os.path.exists(path) and os.path.exists(os.path.join(HERE, path)):
             path = os.path.join(HERE, path)
+        if not os.path.exists(path) and os.path.basename(path).startswith("gs26n_"):
+            # il nostro modello addestrato non si scarica da internet: se manca si usa YOLO26n originale
+            print(f"[modello] {path} non c'è: uso yolo26n_192x480_ncnn_model")
+            path = os.path.join(HERE, "yolo26n_192x480_ncnn_model")
         if not os.path.exists(path) and path.endswith("_ncnn_model"):
             # yolo26n_192x480_ncnn_model -> esporta yolo26n.pt con ingresso 192x480 (alto x largo)
             stem = os.path.basename(path)[: -len("_ncnn_model")]
