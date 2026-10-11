@@ -55,6 +55,8 @@ CLASSES = {
     5: ("bus", 2.55, 12.0, 1.4, 2),
     7: ("camion", 2.5, 8.0, 1.4, 3),
 }
+# altezza tipica (m): quando il veicolo esce di lato dall'immagine la larghezza è tagliata, l'altezza no
+HEIGHTS = {0: 1.7, 1: 1.7, 2: 1.5, 3: 1.4, 5: 3.0, 7: 3.2}
 MOTOR = {2, 3, 5, 7}  # i veicoli per cui un radar suonerebbe
 INF = math.inf
 
@@ -75,6 +77,12 @@ def parse_args():
     g.add_argument("--imgsz", default=None, help="es. 320 o 192,480; se omesso lo legge dal modello NCNN")
     g.add_argument("--conf", type=float, default=0.25, help="confidenza per agganciare un riquadro (ByteTrack)")
     g.add_argument("--tracker", default="bytetrack", help="bytetrack o botsort")
+    g.add_argument("--night", default="auto", choices=["auto", "on", "off"],
+                   help="schiarisce le ombre prima di YOLO (gamma) quando l'immagine è scura")
+    g.add_argument("--gamma", type=float, default=1.0, help="0.5 schiarisce le ombre di notte (aiuta yolo11n, non yolo26n)")
+    g.add_argument("--dark", type=float, default=60.0, help="luminosità media sotto cui è 'notte' (0-255)")
+    g.add_argument("--no-fari", dest="fari", action="store_false",
+                   help="di notte non cercare le coppie di fari (veicoli di cui YOLO vede solo le luci)")
     g.add_argument("--crop", default="0,0.2,1,0.9", help="zona analizzata, frazioni x0,y0,x1,y1")
     g = p.add_argument_group("camera")
     g.add_argument("--hfov", type=float, default=80.0, help="campo visivo orizzontale (gradi)")
@@ -268,6 +276,10 @@ class Track:
         self.d = INF
         self.d_raw = INF  # prima della calibrazione con l'ultrasuono
         self.lw = AlphaBeta(0.5, 0.1, 0.3)  # log della larghezza del riquadro, levigato
+        self.lh = AlphaBeta(0.5, 0.1, 0.3)  # idem per l'altezza (serve quando il riquadro è tagliato di lato)
+        self.hist_h = collections.deque(maxlen=60)  # (t, altezza px) per il TTC di chi è al bordo
+        self.alongside = False  # di fianco: uscito di lato dall'immagine, vicino
+        self.passed = False
         self.conf = None
         self.min_d = INF
         self.lat = 0.0
@@ -299,11 +311,12 @@ class Track:
 
 
 class Estimator:
-    def __init__(self, a, frame_w, x_lo, x_hi, log):
+    def __init__(self, a, frame_w, x_lo, x_hi, log, y_lo=0, y_hi=10 ** 6):
         self.a = a
         self.f = a.f_px or (frame_w / 2) / math.tan(math.radians(a.hfov) / 2)
         self.c0 = a.center_x * frame_w
         self.x_lo, self.x_hi = x_lo, x_hi
+        self.y_lo, self.y_hi = y_lo, y_hi
         self.log = log
         self.tracks = {}
         self.gone = collections.deque(maxlen=20)
@@ -343,8 +356,27 @@ class Estimator:
             tr.last_t = t
             # un riquadro tagliato dal bordo non ha la larghezza vera: il veicolo ci sta passando di fianco
             tr.edge = x1 <= self.x_lo + a.edge_px or x2 >= self.x_hi - a.edge_px
-            if tr.edge and tr.edge_t is None and tr.min_d < 10:
-                tr.edge_t = t
+            ycut = y1 <= self.y_lo + a.edge_px or y2 >= self.y_hi - a.edge_px
+            hm = HEIGHTS.get(tr.cls, 1.5) * a.scale
+            if not ycut:
+                hf = math.exp(tr.lh.update(math.log(max(2.0, y2 - y1)), t))
+                tr.hist_h.append((t, y2 - y1))
+            if tr.edge:
+                # tagliato di lato: la distanza viene dall'altezza, e conta il fianco del veicolo più vicino
+                # all'asse (quello ancora dentro l'immagine), non il centro del riquadro
+                if not ycut:
+                    tr.d_raw = self.f * hm / hf
+                    tr.d = tr.d_raw * self.cam_k
+                    tr.min_d = min(tr.min_d, tr.d)
+                if math.isfinite(tr.d):
+                    sign = -1.0 if a.mirror else 1.0
+                    left = x1 <= self.x_lo + a.edge_px
+                    near_x = x2 if left else x1
+                    # il veicolo si estende verso il bordo: se il suo fianco supera il centro, è in linea con te
+                    overlap = (near_x > self.c0) if left else (near_x < self.c0)
+                    tr.lat_near = 0.0 if overlap else sign * (near_x - self.c0) * tr.d / self.f
+                if tr.edge_t is None and tr.min_d < 10 * a.scale:
+                    tr.edge_t = t
             if not tr.edge:
                 w = x2 - x1
                 cx = (x1 + x2) / 2
@@ -378,6 +410,22 @@ class Estimator:
             recent = [p for p in pts if t - p[0] <= 0.5] or pts[-2:]
             if len(recent) >= 2:
                 tr.vlat, _ = linfit([p[0] for p in recent], [p[2] for p in recent])
+        if tr.edge:
+            ph = [p for p in tr.hist_h if t - p[0] <= a.window]
+            if len(ph) >= 4 and ph[-1][0] - ph[0][0] >= 0.3:
+                rate, _ = linfit([p[0] for p in ph], [math.log(p[1]) for p in ph])
+                tmid = sum(p[0] for p in ph) / len(ph)
+                tr.ttc = max(0.0, 1.0 / rate - (t - tmid)) if rate > 1.0 / a.ttc_max else INF
+            ln = getattr(tr, "lat_near", None)
+            if ln is not None and math.isfinite(tr.d):
+                # il fianco vicino è già nell'immagine: la distanza laterale si legge direttamente
+                tr.clear = abs(ln)
+                tr.zone = "L" if ln > 0 else "R"
+                if tr.clear < a.rider_half:
+                    tr.zone = "B"
+                tr.alongside = tr.d < 8.0 * a.scale
+                if tr.d < 12 * a.scale:
+                    tr.clear_pred = tr.clear
         tr.min_ttc = min(tr.min_ttc, tr.ttc)
         if not tr.edge:
             # dove sarà il veicolo quando ci affianca (estrapolazione limitata, il laterale è rumoroso)
@@ -391,7 +439,7 @@ class Estimator:
                 tr.zone = "B"  # in linea con te: rotta di collisione
             else:
                 tr.zone = "L" if tr.lat_pass > 0 else "R"
-            if tr.d < 12:
+            if tr.d < 12 * a.scale:
                 tr.clear_pred = tr.clear
 
     def _risk(self, tr, t):
@@ -409,8 +457,17 @@ class Estimator:
                 else:
                     traj = 0.6
                 s = tr.weight * urg * traj
-            elif tr.zone == "B" and tr.d < a.tailgate:
+            elif tr.zone == "B" and tr.d < a.tailgate * a.scale:
                 s = 0.4 * tr.weight  # incollato dietro di te
+            if tr.ttc < a.t_warn and tr.clear < a.pass_safe + 2.0 and tr.d <= a.max_range * max(a.scale, 0.05):
+                # sorpasso in arrivo anche se largo: almeno ambra, così sai sempre chi ti sta per affiancare
+                s = max(s, 0.4)
+            if tr.edge and tr.alongside:
+                # ti sta affiancando adesso: pericoloso se il fianco passa entro la distanza di sicurezza
+                if tr.clear < a.pass_safe:
+                    s = max(s, 1.1 * max(tr.weight, 0.95))
+                elif tr.clear < a.pass_safe + 1.0:
+                    s = max(s, 0.5)
         tr.score = s
         new = 2 if s >= 1.0 else 1 if s >= 0.35 else 0
         if new >= tr.level:
@@ -431,6 +488,19 @@ class Estimator:
             if self.on_red:
                 self.on_red(t, tr)
         tr.max_level = max(tr.max_level, tr.level)
+        if tr.alongside and not tr.passed and (tr.cls in MOTOR or tr.cls == 1) and tr.min_ttc < a.t_warn * 2:
+            # sorpasso visto dalla camera: il veicolo arrivava da dietro ed è uscito di lato vicino a te
+            tr.passed = True
+            self.counts["sorpassi_camera"] = self.counts.get("sorpassi_camera", 0) + 1
+            if a.us_side == "B":  # senza ultrasuono laterale la misura del sorpasso è quella della camera
+                self.counts["sorpassi"] += 1
+                if tr.clear < a.pass_safe:
+                    self.counts["sorpassi_stretti"] += 1
+                self.last_pass = {"t": time.time(), "cm": round(tr.clear * 100 / a.scale), "pred": fin(tr.clear_pred, 2),
+                                  "veicolo": tr.name, "durata": 0, "fonte": "camera"}
+                self.log.add("sorpasso", veicolo=tr.name, id=tr.id, livello=tr.level,
+                             sorpasso_misurato_m=round(tr.clear / a.scale, 2), distanza_m=fin(tr.d, 1),
+                             note="visto dalla camera")
 
     def calibrate(self, tr, us_ref, t):
         """L'ultrasuono è preciso da vicino: quando vede lo stesso oggetto della camera, nello stesso
@@ -914,18 +984,39 @@ class Detector:
             if kind == "botsort":
                 f.write("gmc_method: sparseOptFlow\nproximity_thresh: 0.5\nappearance_thresh: 0.8\n"
                         "with_reid: False\nmodel: auto\n")
-        print(f"[modello] {self.name}, ingresso {self.imgsz}, tracker {kind}")
+        import numpy as np
+        self.lut = np.array([255 * (i / 255) ** a.gamma for i in range(256)], np.uint8)
+        self.bright, self.night = None, a.night == "on"
+        self.fari = None
+        if a.fari:
+            from fari import Headlights
+            self.fari = Headlights()
+        print(f"[modello] {self.name}, ingresso {self.imgsz}, tracker {kind}, notte {a.night}")
 
     def detect(self, frame, roi):
         x0, y0, x1, y1 = roi
-        r = self.model.track(frame[y0:y1, x0:x1], persist=True, tracker=self.tracker, imgsz=self.imgsz,
+        img = raw = frame[y0:y1, x0:x1]
+        if self.a.night == "auto":
+            # luminosità media su un'immagine piccola (costa pochissimo), con isteresi per non sfarfallare
+            b = float(cv2.resize(img, (64, 24), interpolation=cv2.INTER_AREA).mean())
+            self.bright = b if self.bright is None else 0.9 * self.bright + 0.1 * b
+            self.night = self.bright < (self.a.dark + 5 if self.night else self.a.dark - 5)
+        if self.night:
+            # di notte YOLO vede soprattutto i fari: schiarire le ombre fa riapparire la carrozzeria
+            img = cv2.LUT(img, self.lut)
+        r = self.model.track(img, persist=True, tracker=self.tracker, imgsz=self.imgsz,
                              conf=0.1, classes=list(CLASSES), verbose=False)[0]
         b = r.boxes
-        if b is None or b.id is None:
+        if b is None:
             return []
         dets = [(tid, c, bx1 + x0, by1 + y0, bx2 + x0, by2 + y0, round(p, 2))
                 for (bx1, by1, bx2, by2), tid, c, p in zip(b.xyxy.tolist(), b.id.int().tolist(),
-                                                           b.cls.int().tolist(), b.conf.tolist())]
+                                                           b.cls.int().tolist(), b.conf.tolist())] if b.id is not None else []
+        if self.night and self.fari:
+            # di notte molti veicoli sono solo due fari: YOLO non li vede, la coppia di luci sì
+            yb = [(d[2] - x0, d[3] - y0, d[4] - x0, d[5] - y0) for d in dets]
+            dets += [(tid, 2, bx1 + x0, by1 + y0, bx2 + x0, by2 + y0, 0.3)
+                     for tid, bx1, by1, bx2, by2 in self.fari.detect(raw, yb)]
         return dedupe(dets)
 
 
@@ -1145,7 +1236,7 @@ def main():
     W, H = src.size
     fx = [float(v) for v in a.crop.split(",")]
     roi = (int(fx[0] * W), int(fx[1] * H), int(fx[2] * W), int(fx[3] * H))
-    est = Estimator(a, W, roi[0], roi[2], log)
+    est = Estimator(a, W, roi[0], roi[2], log, roi[1], roi[3])
     det = None if a.fake else Detector(a)
     if a.fake:
         us = Ultrasonic(a)
@@ -1219,6 +1310,7 @@ def main():
                 "t": now, "mode": mode, "fps": round(fps, 1), "lat_ms": round(lat_ms), "cam_ok": cam_ok,
                 "zones": zones, "near": near, "us_cm": fin(us_cm, 0), "us_side": a.us_side, "has_us": us is not None,
                 "model": det.name if det else None, "imgsz": det.imgsz if det else None,
+                "night": bool(det.night) if det else False,
                 "cal": {"k": round(est.cam_k, 3), "n": est.cal_n, "on": a.autocal and a.us_side == "B"},
                 "fused": est.fused, "us_trust": a.us_trust, "us_blend": a.us_blend, "scale": a.scale,
                 "near_red": a.near_red, "near_amber": a.near_amber,
