@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Guardaspalle · vista</title>
+<style>
+  :root { --bg: #07090c; --fg: #eef2f6; --muted: #8590a0; --green: #2fd27a; --amber: #ffb020; --red: #ff3b3b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: system-ui, -apple-system, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; padding: calc(10px + env(safe-area-inset-top)) 14px 0;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+  #msg { font-size: 21px; font-weight: 700; letter-spacing: .2px; padding: 9px 18px; border-radius: 999px;
+    background: rgba(20, 26, 34, .72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: background .2s, color .2s; text-align: center; max-width: 100%; }
+  #msg.ok { color: var(--green); }
+  #msg.l1 { background: var(--amber); color: #1b1200; }
+  #msg.l2 { background: var(--red); color: #fff; animation: pulse .5s ease-in-out infinite alternate; }
+  #msg.off { color: var(--muted); }
+  #sub { font-size: 14px; color: var(--muted); min-height: 18px; text-align: center; }
+  #foot { position: fixed; left: 0; right: 0; bottom: 0; padding: 0 14px calc(10px + env(safe-area-inset-bottom));
+    display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; color: var(--muted);
+    pointer-events: none; }
+  #foot b { color: var(--fg); font-weight: 600; }
+  #speed { text-align: right; }
+  #speed .v { font-size: 34px; font-weight: 300; color: var(--fg); line-height: 1; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+  .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  #tap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; background: rgba(7, 9, 12, .88); font-size: 22px; font-weight: 600; text-align: center; padding: 24px; }
+  #tap small { color: var(--muted); font-size: 14px; font-weight: 400; max-width: 300px; }
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .15s;
+    box-shadow: inset 0 0 50px 8px var(--red); }
+  @keyframes pulse { from { opacity: 1; } to { opacity: .55; } }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="flash"></div>
+<div id="hud"><div id="msg" class="off">In attesa del Raspberry…</div><div id="sub"></div></div>
+<div id="foot">
+  <div id="info"><span class="dot" id="dot"></span><span id="itext">—</span></div>
+  <div id="speed"></div>
+</div>
+<div id="tap"><div>Tocca per iniziare</div>
+  <small>Attiva il suono degli avvisi e tiene acceso lo schermo. Il telefono deve stare sullo stesso hotspot del Raspberry.</small></div>
+
+<script>
+// Vista "alla Tesla": il proprio mezzo visto da dietro e dall'alto, con i veicoli rilevati dalla Pi
+// disegnati nella posizione stimata e colorati in base al rischio. Legge /state di bike_adas.py.
+//   /vista              dati dal Raspberry che serve la pagina
+//   /vista?demo         traffico simulato nel telefono (senza Raspberry)
+//   /vista?mezzo=auto   forza il disegno del proprio mezzo (bici, monopattino, auto, furgone, camion, bus)
+//   /vista?pi=http://172.20.10.2:8000   legge da un altro indirizzo (la Pi manda già l'header CORS)
+const Q = new URLSearchParams(location.search);
+const DEMO = Q.has("demo");
+const BASE = Q.get("pi") || "";
+const $ = (id) => document.getElementById(id);
+const COL = ["#aab4c2", "#ffb020", "#ff3b3b"];
+const NAME = { auto: "Auto", bus: "Autobus", camion: "Camion", moto: "Moto", bici: "Bici", persona: "Pedone" };
+const SIDE = { L: "a sinistra", B: "dietro", R: "a destra" };
+const HEIGHT = { auto: 1.45, bus: 3.1, camion: 3.3, moto: 1.4, bici: 1.7, persona: 1.75 };
+const MAX_D = 40;            // metri reali mostrati dietro di te
+const EGO = {                // larghezza, lunghezza, altezza in metri
+  bici: [0.6, 1.8, 1.75], monopattino: [0.5, 1.1, 1.75], auto: [1.8, 4.5, 1.45],
+  furgone: [2.0, 5.5, 2.4], camion: [2.5, 10, 3.4], bus: [2.55, 12, 3.1],
+};
+
+let S = null, lastOk = 0, audio = null, beepAt = 0, prevMax = 0, rtt = 0;
+
+// ---------------------------------------------------------------- dati
+async function poll() {
+  try {
+    const t0 = performance.now();
+    const r = await fetch(BASE + "/state", { cache: "no-store" });
+    const s = await r.json();
+    const t1 = performance.now();
+    if (s && s.zones) { S = s; lastOk = t1; rtt = rtt ? 0.8 * rtt + 0.2 * (t1 - t0) : t1 - t0; }
+  } catch (e) { /* riprova */ }
+  setTimeout(poll, 40);  // la Pi aggiorna lo stato a ogni fotogramma (~8 al secondo): chiediamo più spesso
+}
+
+// traffico finto per provare la pagina senza la Pi
+const demo = { t0: performance.now(), cars: [] };
+function demoState(now) {
+  const t = (now - demo.t0) / 1000;
+  const mezzo = Q.get("mezzo") || "bici";
+  const half = EGO[mezzo] ? EGO[mezzo][0] / 2 + 0.05 : 0.35;
+  const tracks = [];
+  const cyc = (p, a, b) => { const x = ((t + p) % a) / a; return x * b; };
+  // 1) auto che sorpassa stretta a sinistra
+  { const x = cyc(0, 9, 1); const d = 38 - x * 46; const lat = 0.4 + Math.min(1, Math.max(0, (30 - d) / 22)) * 1.0;
+    const edge = d < 2.5; tracks.push(mk(1, "auto", d, lat, d > 3 ? (d / 9) : null, edge)); }
+  // 2) camion più largo, in arrivo
+  { const x = cyc(4, 13, 1); const d = 40 - x * 50; tracks.push(mk(2, "camion", d, 2.8 + 0.2 * Math.sin(t), d > 3 ? d / 6 : null, d < 3)); }
+  // 3) bici dietro, lenta
+  { const d = 9 + 3 * Math.sin(t / 3); tracks.push(mk(3, "bici", d, -0.2, null, false)); }
+  function mk(id, cls, d, lat, ttc, edge) {
+    const w = { auto: 1.8, camion: 2.5, bici: 0.6 }[cls], len = { auto: 4.5, camion: 9, bici: 1.8 }[cls];
+    const clear = Math.max(0, Math.abs(lat) - w / 2);
+    const zone = clear < half ? "B" : lat > 0 ? "L" : "R";
+    let level = 0;
+    if (ttc != null && d < 30) level = ttc < 1.6 || (edge && clear < 1.5) ? 2 : ttc < 4 ? 1 : 0;
+    return { id, cls, d, lat, lat_pass: lat, ttc, clear, level, zone, edge, w, len };
+  }
+  const live = tracks.filter((k) => k.d > -k.len);
+  const zones = { L: 0, B: 0, R: 0 };
+  for (const k of live) zones[k.zone] = Math.max(zones[k.zone], k.level);
+  const top = live.filter((k) => k.level).sort((a, b) => b.level - a.level || a.ttc - b.ttc)[0];
+  const near = live.filter((k) => k.zone === "B" && k.d > 0).sort((a, b) => a.d - b.d)[0];
+  const info = { bici: ["Bicicletta", "casco"], monopattino: ["Monopattino", "casco"], auto: ["Auto", "cabina"],
+    furgone: ["Furgone", "cabina"], camion: ["Camion", "cabina"], bus: ["Autobus", "cabina"] }[mezzo] || ["Bicicletta", "casco"];
+  return {
+    t: Date.now() / 1000, mode: "demo", fps: 8, cam_ok: true, zones, near: 0, us_cm: near && near.d < 3 ? near.d * 100 : null,
+    us_side: "B", has_us: true, scale: 1, rider_half: half, pass_safe: 1.5,
+    top: top ? { cls: top.cls, ttc: top.ttc, zone: top.zone, level: top.level } : null,
+    tracks: live, fused: near ? { cm: near.d * 100, kmh_real: 18 } : null,
+    mezzo: { tipo: mezzo, nome: info[0], uscita: info[1] },
+  };
+}
+
+// ---------------------------------------------------------------- proiezione 3D (canvas 2D, nessuna libreria)
+// mondo: x verso la destra di chi guida, y in alto, z in avanti; il tuo mezzo ha il retro in z = 0
+const cv = $("cv"), ctx = cv.getContext("2d");
+let W = 0, H = 0, cam = null;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+// telecamera virtuale davanti e sopra il tuo mezzo, che guarda indietro come uno specchietto:
+// chi arriva da dietro scende dall'orizzonte e cresce avvicinandosi. L'immagine è specchiata,
+// quindi la tua sinistra resta a sinistra dello schermo.
+function setCam(el, eh) {
+  const portrait = H > W;
+  const c = (Q.get("cam") || (portrait ? "12,8,-12,1.05" : "11,10,-12,0.75")).split(",").map(Number);
+  const pos = [0, c[0] + Math.max(0, eh - 1.75) * 1.5, el + c[1]], look = [0, 0, c[2]];
+  const f = norm(sub(look, pos)), r = [1, 0, 0];
+  let u = norm(cross(r, f)); if (u[1] < 0) u = u.map((v) => -v);
+  cam = { pos, f, r, u, foc: Math.min(W, H * 0.75) * c[3] * 1.6, cx: W / 2, cy: H * (portrait ? 0.42 : 0.45) };
+}
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+function P(x, y, z) {
+  const v = sub([x, y, z], cam.pos);
+  const zc = Math.max(0.3, dot(v, cam.f));
+  return [cam.cx + cam.foc * dot(v, cam.r) / zc, cam.cy - cam.foc * dot(v, cam.u) / zc, zc];
+}
+// distanza reale dietro di te -> z sullo schermo: lineare da vicino, compressa da lontano
+const zOf = (d) => (d <= 10 ? -d : -(10 + 20 * (1 - Math.exp(-(d - 10) / 20))));
+
+function poly(pts, fill, stroke, lw) {
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+}
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(Math.min(255, v * k)));
+  return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+// parallelepipedo: centro x, base y0, z da z0 (retro) a z1 (muso). Disegna solo le facce visibili.
+function box(x, y0, z0, w, h, len, col, edge) {
+  const x0 = x - w / 2, x1 = x + w / 2, y1 = y0 + h, z1 = z0 + len;
+  const faces = [
+    { n: [0, 1, 0], c: [x, y1, z0 + len / 2], k: 1.12, v: [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]] },
+    { n: [0, 0, -1], c: [x, y0 + h / 2, z0], k: 0.82, v: [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0]] },
+    { n: [-1, 0, 0], c: [x0, y0 + h / 2, z0 + len / 2], k: 0.66, v: [[x0, y0, z0], [x0, y1, z0], [x0, y1, z1], [x0, y0, z1]] },
+    { n: [1, 0, 0], c: [x1, y0 + h / 2, z0 + len / 2], k: 0.66, v: [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]] },
+    { n: [0, 0, 1], c: [x, y0 + h / 2, z1], k: 0.82, v: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]] },
+  ];
+  for (const fc of faces) {
+    if (dot(fc.n, sub(cam.pos, fc.c)) <= 0) continue;
+    poly(fc.v.map((p) => P(...p)), shade(col, fc.k), edge || "rgba(0,0,0,.25)", 1);
+  }
+}
+function ellipseGround(x, z, rx, rz, fill) {
+  const pts = [];
+  for (let i = 0; i < 28; i++) { const a = (i / 28) * Math.PI * 2; pts.push(P(x + Math.cos(a) * rx, 0, z + Math.sin(a) * rz)); }
+  poly(pts, fill);
+}
+
+// un veicolo: x centro, z del retro; la forma dipende dalla classe
+function drawCar(cls, x, z0, w, len, col, edge) {
+  const h = HEIGHT[cls] || 1.5;
+  if (cls === "auto") {
+    box(x, 0.25, z0, w, h * 0.5, len, col, edge);
+    box(x, 0.25 + h * 0.5, z0 + len * 0.22, w * 0.84, h * 0.42, len * 0.5, shade(col, 0.78), edge);
+  } else if (cls === "camion" || cls === "furgone") {
+    const cab = Math.min(2.2, len * 0.3);
+    box(x, 0.35, z0, w, h * 0.95, len - cab - 0.2, col, edge);           // cassone
+    box(x, 0.35, z0 + len - cab, w * 0.96, h * 0.8, cab, col, edge);     // cabina
+  } else if (cls === "bus") {
+    box(x, 0.3, z0, w, h - 0.3, len, col, edge);
+  } else if (cls === "moto" || cls === "bici" || cls === "monopattino") {
+    box(x, 0.1, z0, Math.min(w, 0.35), 0.7, len, col, edge);
+    box(x, 0.8, z0 + len * 0.35, 0.45, h - 0.8, 0.35, col, edge);         // chi guida
+  } else if (cls === "persona") {
+    box(x, 0, z0, 0.45, h, 0.3, col, edge);
+  } else {
+    box(x, 0.2, z0, w, h, len, col, edge);
+  }
+}
+
+// ---------------------------------------------------------------- scena
+const objs = new Map();
+let lastFrame = performance.now(), roadOff = 0;
+
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  if (DEMO) { S = demoState(now); lastOk = now; }
+  const conn = S && now - lastOk < 1500;
+  const scale = conn && S.scale ? S.scale : 1;
+  const mezzo = Q.get("mezzo") || (conn && S.mezzo ? S.mezzo.tipo : "bici");
+  const [ew, elReal, eh] = EGO[mezzo] || EGO.bici;
+  const el = Math.min(elReal, 6);  // dei mezzi lunghi si vede la parte dietro, il muso esce dallo schermo
+  setCam(el, eh);
+  const zones = conn ? S.zones : { L: 0, B: 0, R: 0 };
+  const pulse = 0.55 + 0.45 * Math.sin(now / 110);
+
+  // sfondo: cielo scuro e asfalto
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#0b0e13"); g.addColorStop(1, "#151a21");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // strada: la tua corsia è centrata su di te, una corsia a sinistra (da dove sorpassano)
+  const laneW = Math.max(3.2, ew + 1.6), half = laneW / 2;
+  const zFar = -90, zNear = 14 + el;
+  const road = [[-half - laneW - 0.5, zFar], [half + 0.8, zFar], [half + 0.8, zNear], [-half - laneW - 0.5, zNear]];
+  poly(road.map(([x, z]) => P(x, 0, z)), "#1c222b");
+  // bordo destro continuo, linea di sinistra tratteggiata che scorre verso di te
+  const line = (x, dashed, col) => {
+    if (!dashed) { poly([P(x - 0.07, 0, zFar), P(x + 0.07, 0, zFar), P(x + 0.07, 0, zNear), P(x - 0.07, 0, zNear)], col); return; }
+    for (let z = zFar - (zFar % 6) + roadOff; z < zNear; z += 6) {
+      const a = Math.max(z, zFar), b = Math.min(z + 3, zNear);
+      if (b > a) poly([P(x - 0.07, 0, a), P(x + 0.07, 0, a), P(x + 0.07, 0, b), P(x - 0.07, 0, b)], col);
+    }
+  };
+  roadOff = (roadOff - dt * 5 + 6) % 6;
+  line(half + 0.5, false, "#5b6676");
+  line(-half, true, "#c9d2dc");
+  line(-half - laneW, false, "#5b6676");
+  const hz = P(0, 0, zFar)[1], fz = P(0, 0, zOf(MAX_D))[1];
+  const fog = ctx.createLinearGradient(0, hz - 2, 0, fz);
+  fog.addColorStop(0, "rgba(11,14,19,1)"); fog.addColorStop(1, "rgba(11,14,19,0)");
+  ctx.fillStyle = fog; ctx.fillRect(0, 0, W, fz);
+
+  // zone di rischio attorno a te: macchie sull'asfalto come l'angolo cieco della Tesla
+  const zoneFill = (lvl, a) => lvl === 2 ? `rgba(255,59,59,${0.42 * pulse * a})` : lvl === 1 ? `rgba(255,176,32,${0.3 * a})` : null;
+  const zl = zoneFill(zones.L, 1), zr = zoneFill(zones.R, 1), zb = zoneFill(zones.B, 1);
+  const glow = (x0, x1, z0, z1, fill) => {
+    if (!fill) return;
+    poly([P(x0, 0, z0), P(x1, 0, z0), P(x1, 0, z1), P(x0, 0, z1)], fill);
+  };
+  glow(-ew / 2 - 2.6, -ew / 2 - 0.15, -9, el + 0.5, zl);
+  glow(ew / 2 + 0.15, ew / 2 + 2.0, -9, el + 0.5, zr);
+  glow(-ew / 2 - 0.1, ew / 2 + 0.1, -9, -0.3, zb);
+
+  // ultrasuono senza veicolo visto dalla camera: ostacolo generico alla distanza misurata
+  const items = [];
+  const seen = new Set();
+  if (conn) {
+    for (const t of S.tracks) {
+      if (!NAME[t.cls]) continue;
+      seen.add(t.id);
+      // distanze e laterali sono nella scala della scena (macchinina): riportati in metri veri
+      const dReal = (t.d != null ? t.d : MAX_D * scale) / scale;
+      let x, zBack;
+      if (t.edge) {
+        // ti sta affiancando: di fianco a te, dal lato giusto, alla distanza di sorpasso
+        const sgn = t.zone === "R" ? 1 : t.zone === "L" ? -1 : (t.lat_pass > 0 ? -1 : 1);
+        const clear = t.clear != null ? Math.max(0.3, t.clear / scale) : 1.2;
+        x = t.zone === "B" ? 0 : sgn * (ew / 2 + Math.min(clear, 3.5) + t.w / 2 - 0.0);
+        zBack = -Math.min(dReal, 2.5);
+      } else {
+        x = -(t.lat || 0) / scale;                       // lat > 0 = alla tua sinistra
+        zBack = zOf(dReal) - t.len;                     // d è al muso dell'altro veicolo
+      }
+      let o = objs.get(t.id);
+      if (!o) { o = { x, z: zBack, a: 0 }; objs.set(t.id, o); }
+      const al = 1 - Math.exp(-dt / 0.06);  // levigatura breve: poco ritardo visivo
+      o.x += (x - o.x) * al; o.z += (zBack - o.z) * al; o.a = Math.min(1, o.a + dt * 3);
+      o.t = t;
+    }
+  }
+  for (const [id, o] of objs) {
+    if (!seen.has(id)) { o.a -= dt * 2.5; if (o.a <= 0) { objs.delete(id); continue; } }
+    items.push(o);
+  }
+  // l'ultrasuono vede qualcosa dietro che la camera non ha in linea: lo disegniamo come sagoma neutra
+  const usCm = conn ? (S.fused && S.fused.cm != null ? S.fused.cm : S.us_cm) : null;
+  const hasInline = items.some((o) => o.t.zone === "B" && !o.t.edge);
+  if (conn && S.us_side === "B" && usCm != null && !hasInline) {
+    items.push({ ghost: true, x: 0, z: zOf(usCm / 100 / scale) - 1.2, a: 1, t: { level: S.near || 0 } });
+  }
+
+  // disegno dal più lontano al più vicino alla telecamera (il tuo mezzo è a z da 0 a el)
+  const far = (x, z) => Math.hypot(x - cam.pos[0], z - cam.pos[2]);
+  const drawList = items.map((o) => ({ o, key: far(o.x, o.z + (o.t.len || 1.2) / 2) }));
+  drawList.push({ ego: true, key: far(0, el / 2) });
+  drawList.sort((a, b) => b.key - a.key);
+  for (const it of drawList) {
+    if (it.ego) { drawEgo(mezzo, ew, el, zones); continue; }
+    drawOther(it.o, pulse, scale);
+  }
+  placed.length = 0;
+  for (const it of drawList.slice().reverse()) if (!it.ego) drawLabel(it.o, scale);
+
+  hud(now, conn, zones, scale, mezzo);
+  requestAnimationFrame(frame);
+}
+
+function drawEgo(mezzo, ew, el, zones) {
+  const col = "#f4f7fa";
+  ellipseGround(0, el / 2, ew * 0.75, el * 0.62, "rgba(47,210,122,.10)");
+  if (mezzo === "bici" || mezzo === "monopattino") {
+    box(0, 0.05, 0, 0.12, 0.7, el, "#c8d0da");                          // ruote e telaio
+    box(0, 0.75, el * 0.35, 0.5, 0.65, 0.35, col);                      // busto
+    box(0, 1.42, el * 0.38, 0.3, 0.26, 0.3, "#2fd27a");                 // casco
+    box(0, 1.05, el * 0.78, 0.62, 0.06, 0.08, "#c8d0da");               // manubrio
+  } else {
+    drawCar(mezzo === "auto" ? "auto" : mezzo === "bus" ? "bus" : "camion", 0, 0, ew, el, col, "rgba(47,210,122,.55)");
+    // fanali posteriori, visti dall'alto sul bordo del tetto dietro
+    const y = (mezzo === "auto" ? 0.25 + HEIGHT.auto * 0.5 : mezzo === "bus" ? 3.1 : 0.35 + 3.3 * 0.95) + 0.01;
+    poly([P(-ew / 2, y, 0), P(-ew / 2 + 0.4, y, 0), P(-ew / 2 + 0.4, y, 0.12), P(-ew / 2, y, 0.12)], "#ff4d4d");
+    poly([P(ew / 2 - 0.4, y, 0), P(ew / 2, y, 0), P(ew / 2, y, 0.12), P(ew / 2 - 0.4, y, 0.12)], "#ff4d4d");
+  }
+}
+
+function drawOther(o, pulse, scale) {
+  const t = o.t, lvl = t.level || 0;
+  ctx.globalAlpha = Math.max(0, Math.min(1, o.a));
+  if (o.ghost) {
+    const col = COL[lvl];
+    ellipseGround(o.x, o.z + 0.6, 0.9, 0.7, lvl ? col + "55" : "rgba(170,180,194,.25)");
+    box(o.x, 0, o.z, 1.0, 0.8, 1.2, lvl ? col : "#6b7584", "rgba(255,255,255,.25)");
+    ctx.globalAlpha = 1; return;
+  }
+  const len = t.len || 4.5, w = t.w || 1.8;
+  const col = COL[lvl];
+  // ombra/alone colorato a terra
+  const gA = lvl === 2 ? 0.5 * pulse + 0.2 : lvl === 1 ? 0.35 : 0.0;
+  if (gA) ellipseGround(o.x, o.z + len / 2, w * 0.9 + 0.4, len * 0.62 + 0.4, lvl === 2 ? `rgba(255,59,59,${gA})` : `rgba(255,176,32,${gA})`);
+  // traiettoria prevista fino a dove ti affianca
+  if (lvl >= 1 && !t.edge && t.lat_pass != null) {
+    const xp = -t.lat_pass / scale;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath(); const a = P(o.x, 0.02, o.z + len), b = P(xp, 0.02, 0.2);
+    ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (lvl === 2) { ctx.shadowColor = col; ctx.shadowBlur = 22 * pulse; }
+  drawCar(t.cls, o.x, o.z, w, len, lvl ? col : "#aab4c2", lvl ? "rgba(255,255,255,.35)" : "rgba(0,0,0,.3)");
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+}
+
+const placed = [];
+function drawLabel(o, scale) {
+  if (o.ghost || !o.t.level || o.a < 0.5) return;
+  const t = o.t, h = HEIGHT[t.cls] || 1.5;
+  const p = P(o.x, h + 0.9, o.z + (t.len || 4) / 2);
+  const parts = [];
+  if (t.ttc != null && t.ttc >= 0 && t.ttc < 30) parts.push(t.ttc.toFixed(1).replace(".", ",") + " s");
+  if (t.edge || t.zone !== "B") { if (t.clear != null) parts.push("↔ " + (t.clear / scale).toFixed(1).replace(".", ",") + " m"); }
+  else if (t.d != null) parts.push(fmtD(t.d / scale));
+  if (!parts.length) return;
+  const txt = parts.join("  ·  ");
+  ctx.font = "700 14px system-ui, -apple-system, sans-serif";
+  const w = ctx.measureText(txt).width + 18;
+  let y = p[1];  // le etichette non si coprono: quella del veicolo più lontano sale sopra
+  for (let i = 0; i < placed.length; i++) {
+    const q = placed[i];
+    if (Math.abs(q[0] - p[0]) < (q[2] + w) / 2 && Math.abs(q[1] - y) < 26) { y = q[1] - 28; i = -1; }
+  }
+  placed.push([p[0], y, w]);
+  ctx.fillStyle = COL[t.level]; roundRect(p[0] - w / 2, y - 26, w, 24, 12); ctx.fill();
+  ctx.fillStyle = t.level === 2 ? "#fff" : "#1b1200"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(txt, p[0], y - 14);
+  ctx.textBaseline = "alphabetic";
+}
+const fmtD = (m) => (m < 10 ? m.toFixed(1).replace(".", ",") : Math.round(m)) + " m";
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ---------------------------------------------------------------- testo, suono, vibrazione
+function hud(now, conn, z, scale, mezzo) {
+  const msg = $("msg"), max = Math.max(z.L, z.B, z.R);
+  let sub = "";
+  if (!conn) { msg.className = "off"; msg.textContent = "In attesa del Raspberry…"; }
+  else if (max) {
+    const side = z.L === max ? "L" : z.R === max ? "R" : "B";
+    const who = S.top && NAME[S.top.cls] ? NAME[S.top.cls] : "Veicolo";
+    msg.className = "l" + max;
+    msg.textContent = max === 2 ? `${who} ${SIDE[S.top ? S.top.zone : side]}!` : `${who} in arrivo ${SIDE[S.top ? S.top.zone : side]}`;
+    if (S.top && S.top.ttc != null && S.top.ttc > 0) sub = `ti raggiunge tra ${S.top.ttc.toFixed(1).replace(".", ",")} s`;
+  } else if (!S.cam_ok) { msg.className = "l1"; msg.textContent = "Camera assente"; sub = "solo ultrasuono"; }
+  else { msg.className = "ok"; msg.textContent = "Strada libera"; }
+  $("sub").textContent = sub;
+  $("flash").style.opacity = conn && max === 2 ? 0.75 : 0;
+
+  if (conn && max > prevMax) {
+    if (navigator.vibrate) navigator.vibrate(max === 2 ? [120, 60, 120] : 60);
+  }
+  if (conn && max === 2 && audio && now > beepAt) { beep(z.B === 2 ? 1500 : 2400); beepAt = now + 320; }
+  prevMax = conn ? max : 0;
+
+  $("dot").className = "dot" + (conn ? " on" : "");
+  const nome = conn && S.mezzo ? S.mezzo.nome : (EGO[mezzo] ? mezzo : "");
+  $("itext").innerHTML = conn
+    ? [nome, DEMO ? "demo" : `${S.fps} fps · ritardo ${Math.round((S.lat_ms || 0) + rtt / 2 + 20)} ms`, scale < 1 ? `scala 1:${Math.round(1 / scale)}` : ""].filter(Boolean).join(" · ")
+    : "non collegato";
+  const k = conn && S.fused && S.fused.kmh_real != null && S.fused.kmh_real > 1 ? Math.round(S.fused.kmh_real) : null;
+  $("speed").innerHTML = k != null ? `<div class="v">${k}</div>km/h in avvicinamento` : "";
+}
+function beep(freq) {
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.frequency.value = freq; o.type = "square";
+  g.gain.setValueAtTime(0.0001, audio.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.25, audio.currentTime + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.12);
+  o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.13);
+}
+async function keepAwake() {
+  try { if ("wakeLock" in navigator) await navigator.wakeLock.request("screen"); } catch (e) { /* facoltativo */ }
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") keepAwake(); });
+$("tap").addEventListener("click", () => {
+  $("tap").style.display = "none";
+  try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
+  keepAwake();
+});
+if (Q.has("auto")) $("tap").style.display = "none";
+
+addEventListener("resize", resize);
+resize();
+setCam(1.8, 1.75);
+if (!DEMO) poll();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

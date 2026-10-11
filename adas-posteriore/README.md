@@ -10,7 +10,7 @@ Sistema che guarda la strada **dietro al ciclista** e lo avvisa quando arriva un
 | Cartella | Cosa c'è |
 |---|---|
 | [`codice/`](codice/) | Tutto il codice della demo. Si parte da [`codice/README.md`](codice/README.md) (come installare e avviare) e [`codice/ARCHITETTURA.md`](codice/ARCHITETTURA.md) (come funziona, piano demo e pitch). |
-| [`codice/perception/`](codice/perception/) | **Raspberry Pi sulla bici**: `bike_adas.py` (camera + ultrasuoni + YOLO + rischio), dashboard web, pagina `/test`, servizio di avvio automatico. |
+| [`codice/perception/`](codice/perception/) | **Raspberry Pi sulla bici**: `bike_adas.py` (camera + ultrasuoni + YOLO + rischio), dashboard web, pagine `/test` e `/vista`, servizio di avvio automatico. |
 | [`codice/helmet_unoq/`](codice/helmet_unoq/) | **Casco** con Arduino UNO Q: sketch per il microcontrollore e script Python lato Linux. |
 | [`codice/bike_arduino_uno/`](codice/bike_arduino_uno/) | Riserva: HC-SR04 letto da un Arduino UNO collegato in USB al Pi. |
 | [`codice/bike_unoq/`](codice/bike_unoq/) | Piano B: tutto sulla UNO Q montata sulla bici, senza Raspberry. |
@@ -28,6 +28,6 @@ Sistema che guarda la strada **dietro al ciclista** e lo avvisa quando arriva un
   `cd codice && python -c "from ultralytics import YOLO; YOLO('training/gs26n.pt').export(format='ncnn', imgsz=(192, 480))" && mv training/gs26n_ncnn_model perception/gs26n_192x480_ncnn_model`.
   Se manca, `bike_adas.py` usa da solo YOLO26n originale (`yolo26n_192x480_ncnn_model`, scaricato ed esportato al primo avvio).
 - [`codice/training/`](codice/training/) contiene gli script di addestramento (`label.py` etichetta i video con un modello grande, `static_filter.py` toglie i fotogrammi fermi, `train.py` addestra, `val.py` valuta). I percorsi del dataset sono quelli della macchina dove è stato addestrato: vanno adattati.
-- Dashboard su `http://<ip-pi>:8000`, confronto camera/ultrasuono su `/test`.
+- Dashboard su `http://<ip-pi>:8000`, confronto camera/ultrasuono su `/test`, vista per telefono in stile Tesla su `http://<ip-pi>:8000/vista` (`/vista?demo` mostra traffico simulato, senza camera).
 
 Il token Telegram va in una variabile d'ambiente (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`), mai nel repository.

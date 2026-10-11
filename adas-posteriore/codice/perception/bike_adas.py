@@ -1164,6 +1164,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, f.read(), "text/html; charset=utf-8")
             except OSError:
                 self._send(404, "test.html mancante")
+        elif path == "/vista":
+            try:
+                with open(os.path.join(HERE, "vista.html"), "rb") as f:
+                    self._send(200, f.read(), "text/html; charset=utf-8")
+            except OSError:
+                self._send(404, "vista.html mancante")
         elif path in ("/", "/index.html"):
             try:
                 with open(os.path.join(HERE, "dashboard.html"), "rb") as f:
