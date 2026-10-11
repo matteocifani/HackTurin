@@ -171,19 +171,42 @@ def create_app(db_path: Optional[Path] = None) -> FastAPI:
         return {"status": "ok", "events": db.count_events()}
 
     # ---------------- pagine ----------------
+    # UI nuova: export statico di Next (kit IAMAimpresa) in static/ui/, vedi webapp/README.md.
+    # Se la build manca si usano le pagine precedenti, che restano comunque raggiungibili sotto /legacy.
+    UI_DIR = STATIC_DIR / "ui"
+
+    def _pagina(nome: str) -> FileResponse:
+        nuova = UI_DIR / f"{nome}.html"
+        return FileResponse(nuova if nuova.exists() else STATIC_DIR / f"{nome}.html")
+
     @app.get("/", include_in_schema=False)
     def page_public():
-        return FileResponse(STATIC_DIR / "index.html")
+        return _pagina("index")
 
     @app.get("/comune", include_in_schema=False)
     def page_comune():
-        return FileResponse(STATIC_DIR / "comune.html")
+        return _pagina("comune")
 
     @app.get("/emergenza", include_in_schema=False)
     def page_emergenza():
+        return _pagina("emergenza")
+
+    @app.get("/legacy", include_in_schema=False)
+    def legacy_public():
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/legacy/comune", include_in_schema=False)
+    def legacy_comune():
+        return FileResponse(STATIC_DIR / "comune.html")
+
+    @app.get("/legacy/emergenza", include_in_schema=False)
+    def legacy_emergenza():
         return FileResponse(STATIC_DIR / "emergenza.html")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    if UI_DIR.exists():
+        # asset della UI nuova: /_next/..., /icon.svg e i payload .txt della navigazione client
+        app.mount("/", StaticFiles(directory=UI_DIR), name="ui")
     return app
 
 

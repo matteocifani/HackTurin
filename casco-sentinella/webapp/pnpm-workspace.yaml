@@ -1,0 +1,12 @@
+# pnpm settings (single package).
+
+# unrs-resolver (used by eslint's import resolver) has an install script that links its prebuilt
+# binary; pnpm requires build scripts to be approved explicitly.
+# GHSA-vfj7-8cjw-p6xm: `braces` <= 3.0.3, no patched version published yet. It is reached only through
+# eslint-config-next (lint tooling, never part of the application bundle), so it is accepted here.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm
+
+allowBuilds:
+  unrs-resolver: true
