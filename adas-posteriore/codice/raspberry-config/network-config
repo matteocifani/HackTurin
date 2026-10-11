@@ -1,0 +1,15 @@
+network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: true
+      dhcp6: true
+      optional: true
+  wifis:
+    wlan0:
+      dhcp4: true
+      regulatory-domain: "IT"
+      access-points:
+        "iPhone di Matteo":
+          password: "<WIFI_PASSWORD>"
+      optional: true

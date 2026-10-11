@@ -1,0 +1,26 @@
+#cloud-config
+manage_resolv_conf: false
+
+hostname: "guardaspalle"
+manage_etc_hosts: true
+packages:
+- avahi-daemon
+apt:
+  preserve_sources_list: true
+  conf: |
+    Acquire {
+      Check-Date "false";
+    };
+timezone: "Europe/Rome"
+keyboard:
+  model: pc105
+  layout: "it"
+user:
+  name: "utente"
+  shell: /bin/bash
+  lock_passwd: false
+  passwd: "<PASSWORD_HASH>"
+  sudo: null
+ssh_pwauth: true
+runcmd:
+  - [ systemctl, enable, --now, ssh ]
