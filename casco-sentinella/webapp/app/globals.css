@@ -1,0 +1,199 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* Typefaces referenced by name in styles/tokens.css ('Geist Variable', 'Geist Mono Variable'). */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+/* Design-system tokens: the only place where colours, radii, shadows and spacing are defined. */
+@import '../styles/tokens.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* Tailwind v4 removed the pointer cursor from buttons; every enabled button gets it back. */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* The assistant panel: a few animations that touch box-shadow or background-position, which Tailwind's ring
+   utilities (box-shadow too) would fight over. `prefers-reduced-motion` switches them off at the bottom. */
+
+/* The composer in focus: the border takes the primary and a soft halo breathes. */
+@keyframes assistant-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--primary) 7%, transparent),
+      0 0 18px -4px color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--primary) 11%, transparent),
+      0 0 28px -2px color-mix(in oklab, var(--primary) 34%, transparent);
+  }
+}
+.assistant-composer {
+  transition:
+    border-color var(--duration-base),
+    box-shadow var(--duration-base);
+}
+.assistant-composer:focus-within {
+  border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+  animation: assistant-glow var(--duration-ambient) ease-in-out infinite;
+}
+
+/* The panel's entrance: it slides in and a warm halo fades out. One keyframe, because two classes that both
+   declare `animation` would cancel each other. */
+@keyframes assistant-enter {
+  0% {
+    opacity: 0;
+    transform: translateX(2.5rem);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--primary) 30%, var(--border)),
+      0 8px 44px -6px color-mix(in oklab, var(--primary) 32%, transparent);
+  }
+  45% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.assistant-enter {
+  animation: assistant-enter var(--duration-entrance) var(--ease-out) both;
+}
+
+/* The gradient header: a band of light crosses it when the panel opens. The light is the rail's foreground. */
+@keyframes assistant-sheen {
+  from {
+    transform: translateX(-130%) skewX(-14deg);
+  }
+  to {
+    transform: translateX(280%) skewX(-14deg);
+  }
+}
+.assistant-sheen {
+  position: relative;
+  overflow: hidden;
+}
+.assistant-sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent,
+    color-mix(in oklab, var(--sidebar-foreground) 13%, transparent),
+    transparent
+  );
+  animation: assistant-sheen var(--duration-entrance) ease-out calc(var(--duration-entrance) * 0.2) both;
+}
+
+/* «Sto lavorando…»: text with a light running through it. */
+@keyframes assistant-shimmer {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -80% 0;
+  }
+}
+.assistant-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 35%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 65%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: assistant-shimmer var(--duration-shimmer) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-composer:focus-within {
+    animation: none;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 8%, transparent);
+  }
+  .assistant-enter {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .assistant-sheen::after {
+    content: none;
+  }
+  .assistant-shimmer {
+    animation: none;
+    background-image: none;
+    color: var(--muted-foreground);
+  }
+}
+
+/* ---- Casco Sentinella: Leaflet dentro il design system ---- */
+.leaflet-container {
+  font-family: inherit;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 0.5rem;
+}
+/* Nuovo evento sulla mappa: un solo impulso discreto */
+.pulse {
+  animation: pulse 1.2s ease-out 1;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@keyframes pulse {
+  0% {
+    stroke-width: 10;
+    stroke-opacity: 0.8;
+  }
+  100% {
+    stroke-width: 2;
+    stroke-opacity: 1;
+  }
+}
+.leaflet-tooltip.sim-tag {
+  background: #3b3f46;
+  color: #fff;
+  border: 0;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0 4px;
+  box-shadow: none;
+}
+.leaflet-tooltip.sim-tag::before {
+  display: none;
+}
+.helmet-icon {
+  background: #0b69bb;
+  color: #fff;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #0b69bb;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+}
+.helmet-icon.offline {
+  background: #6c737c;
+  box-shadow: 0 0 0 2px #6c737c;
+}
