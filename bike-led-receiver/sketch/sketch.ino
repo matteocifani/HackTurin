@@ -14,8 +14,13 @@
 #define LED_PIN     A0     // strip data-in pin: check against your wiring
 #define NUM_LEDS    30
 #define BRIGHTNESS  40     // 0-255; the strip is powered by the board, keep it low
-#define FLIP_SIDES  false  // true if the strip's first LED sits on the rider's right
+#define MAP_MODE    0      // 1 = fixed index pattern to locate LEDs on the helmet (no zones); 0 = normal
 #define WATCHDOG_MS 3000   // no set_state call for this long -> link lost
+
+// Zones as seen by the rider: 0 = left, 1 = behind, 2 = right. First LED and length;
+// a zone may wrap past the last LED to LED 0. LEDs in no zone (overlap, back of helmet) stay off.
+const uint8_t ZONE_FROM[3] = {5, 9, 13};  // mapped on the helmet: 5-8 front left, 9-12 forehead, 13-16 front right
+const uint8_t ZONE_LEN[3]  = {4, 4, 4};
 
 #if USE_STRIP
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -42,6 +47,12 @@ void set_state(int m) {
 
 uint32_t lastKey = 0xFFFFFFFF;
 
+#if USE_STRIP
+void fillZone(uint8_t z, uint32_t c) {
+  for (uint8_t i = 0; i < ZONE_LEN[z]; i++) strip.setPixelColor((ZONE_FROM[z] + i) % NUM_LEDS, c);
+}
+#endif
+
 void ledStep() {
   uint8_t m = mask;
   if (millis() - lastCall > WATCHDOG_MS) m = LOST;
@@ -63,21 +74,17 @@ void ledStep() {
     Monitor.println((unsigned long)(millis() - lastCall));
   }
 
-#if USE_STRIP
+#if USE_STRIP && !MAP_MODE
   // show() blocks interrupts: redraw only when the picture changes
   uint32_t key = ((uint32_t)m << 8) | blink;
   if (key != lastKey) {
     lastKey = key;
     strip.clear();
-    if (m == LOST) {
-      if (blink) strip.fill(LOST_COLOR);
-    } else {
-      for (uint8_t z = 0; z < 3; z++) {
-        if (!(m & (1 << z))) continue;
-        uint8_t s = FLIP_SIDES ? 2 - z : z;
-        // three (nearly) equal thirds; boundaries rounded so every LED is covered
-        uint16_t from = s * NUM_LEDS / 3;
-        strip.fill(NEAR_COLOR, from, (s + 1) * NUM_LEDS / 3 - from);
+    for (uint8_t z = 0; z < 3; z++) {
+      if (m == LOST) {
+        if (blink) fillZone(z, LOST_COLOR);
+      } else if (m & (1 << z)) {
+        fillZone(z, NEAR_COLOR);
       }
     }
     strip.show();
@@ -206,6 +213,11 @@ void setup() {
 #if USE_STRIP
   strip.begin();
   strip.setBrightness(BRIGHTNESS);
+#if MAP_MODE
+  // every 5th LED white (0, 5, 10, ...), the 4 after it in one colour: red, green, blue, yellow, magenta, cyan
+  const uint32_t MAP_COLORS[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF};
+  for (uint8_t i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, i % 5 ? MAP_COLORS[i / 5 % 6] : 0xFFFFFF);
+#endif
   strip.show();
   Monitor.println("strip initialised");
 #endif
