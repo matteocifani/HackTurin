@@ -89,7 +89,8 @@ def parse_args():
     g.add_argument("--hfov", type=float, default=80.0, help="campo visivo orizzontale (gradi)")
     g.add_argument("--f-px", type=float, default=None, help="focale in pixel (sostituisce --hfov)")
     g.add_argument("--center-x", type=float, default=0.5, help="frazione orizzontale che corrisponde a 'dritto dietro'")
-    g.add_argument("--mirror", action="store_true", help="immagine specchiata dalla webcam")
+    g.add_argument("--mirror", "--specchia", action="store_true",
+                   help="inverte sinistra e destra (immagine specchiata, o demo vista da davanti alla camera)")
     g = p.add_argument_group("rischio")
     g.add_argument("--t-warn", type=float, default=6.0, help="TTC (s) da cui inizia l'urgenza")
     g.add_argument("--t-crit", type=float, default=1.5, help="TTC (s) di urgenza massima")
@@ -136,15 +137,24 @@ def parse_args():
                    help="demo da tavolo: larghezza vera (cm) del veicolo giocattolo visto da dietro. Le distanze "
                         "restano in cm veri; ogni veicolo è trattato come largo così, e le persone (chi presenta) "
                         "vengono ignorate")
+    g.add_argument("--giocattolo-alto", type=float, default=None, metavar="CM",
+                   help="altezza vera (cm) del giocattolo, serve quando è tagliato al bordo dell'immagine")
     profili_mezzo.aggiungi(p)
     a = profili_mezzo.parse(p)
     if a.giocattolo:
         # un giocattolo può essere scambiato per auto, camion o bus: per tutti vale la sua larghezza misurata
         a.scale = a.giocattolo / 100.0 / CLASSES[2][1]
+        a.night, a.fari = "off", False  # al tavolo è sempre "giorno": niente fari né schiarimento
         for c in (1, 3, 5, 7):
             n, _, _, wgt, code = CLASSES[c]
             CLASSES[c] = (n, CLASSES[2][1], CLASSES[2][2], wgt, code)
             HEIGHTS[c] = HEIGHTS[2]
+        # nel mondo del giocattolo anche gli spazi laterali sono in proporzione: tutto resta in cm veri
+        a.rider_half *= a.scale
+        a.pass_safe *= a.scale
+        if a.giocattolo_alto:
+            for c in (1, 2, 3, 5, 7):
+                HEIGHTS[c] = a.giocattolo_alto / 100.0 / a.scale
     return a
 
 
@@ -371,6 +381,8 @@ class Estimator:
                 continue
             if cls == 0 and a.giocattolo:
                 continue  # al tavolo le persone sono chi fa la demo, non un pericolo
+            if a.giocattolo and cls in (1, 3, 5, 7):
+                cls = 2  # c'è un solo giocattolo: niente cambi auto/camion/moto che spezzano la traccia
             tr = self.tracks.get(tid)
             if tr is None:
                 tr = self.tracks[tid] = Track(tid, cls, t)
@@ -414,8 +426,11 @@ class Estimator:
                 # camera rivolta indietro: la destra dell'immagine è la SINISTRA del ciclista (positivo)
                 # laterale in "larghezze di veicolo": non dipende dalla focale
                 wm = tr.width_m * a.scale
-                tr.lat = sign * (cx - self.c0) * wm / wf
                 tr.d_raw = self.f * wm / wf
+                if a.giocattolo_alto and not ycut:
+                    # giocattolo: l'altezza non cambia se l'auto è girata di tre quarti, la larghezza sì
+                    tr.d_raw = self.f * hm / hf
+                tr.lat = sign * (cx - self.c0) * tr.d_raw / self.f
                 tr.d = tr.d_raw * self.cam_k
                 tr.min_d = min(tr.min_d, tr.d)
                 tr.hist.append((t, w, tr.lat))
@@ -519,10 +534,16 @@ class Estimator:
         if not tr.edge:
             # dove sarà il veicolo quando ci affianca (estrapolazione limitata, il laterale è rumoroso)
             # da vicino conta la posizione attuale: l'estrapolazione si riduce sotto i 10 m
-            horizon = min(tr.ttc, 3.0) * clamp(tr.d / 10.0, 0.0, 1.0)
-            shift = clamp(tr.vlat * horizon, -1.0, 1.0) if tr.ttc < INF else 0.0
+            horizon = min(tr.ttc, 3.0) * clamp(tr.d / (10.0 * a.scale), 0.0, 1.0)
+            shift = clamp(tr.vlat * horizon, -a.scale, a.scale) if tr.ttc < INF else 0.0
             tr.lat_pass = tr.lat + shift
-            gap = abs(tr.lat_pass) - tr.width_m / 2  # dal fianco del veicolo all'asse della bici
+            gap = abs(tr.lat_pass) - tr.width_m * a.scale / 2  # dal fianco del veicolo all'asse della bici
+            if a.giocattolo and math.isfinite(tr.d_raw):
+                # giocattolo (anche girato di tre quarti): il fianco vicino è il bordo del riquadro verso il centro
+                bx1, _, bx2, _ = tr.bbox
+                near_x = bx1 if (bx1 + bx2) / 2 > self.c0 else bx2
+                straddle = bx1 < self.c0 < bx2
+                gap = 0.0 if straddle else abs(near_x - self.c0) * tr.d_raw / self.f
             tr.clear = max(0.0, gap)
             if gap < a.rider_half:
                 tr.zone = "B"  # in linea con te: rotta di collisione
@@ -553,7 +574,7 @@ class Estimator:
                     traj = 2.0
                 elif tr.clear < a.pass_safe:
                     traj = 1.5
-                elif tr.clear < a.pass_safe + 0.5:
+                elif tr.clear < a.pass_safe + 0.5 * a.scale:
                     traj = 1.0
                 else:
                     traj = 0.6
@@ -564,15 +585,20 @@ class Estimator:
               and (tr.rate_h is None or tr.rate_h > -0.05)):
             s = 0.4 * tr.weight  # fermo e incollato dietro di te, anche se non l'hai visto arrivare
         if threat:
-            if tr.ttc < a.t_warn and tr.clear < a.pass_safe + 2.0 and tr.d <= a.max_range * max(a.scale, 0.05):
+            if tr.ttc < a.t_warn and tr.clear < a.pass_safe + 2.0 * a.scale and tr.d <= a.max_range * max(a.scale, 0.05):
                 # sorpasso in arrivo anche se largo: almeno ambra, così sai sempre chi ti sta per affiancare
                 s = max(s, 0.4)
             if tr.edge and tr.alongside:
                 # ti sta affiancando adesso: pericoloso se il fianco passa entro la distanza di sicurezza
                 if tr.clear < a.pass_safe:
                     s = max(s, 1.1 * max(tr.weight, 0.95))
-                elif tr.clear < a.pass_safe + 1.0:
+                elif tr.clear < a.pass_safe + 1.0 * a.scale:
                     s = max(s, 0.5)
+        if a.giocattolo and math.isfinite(tr.d) and tr.n_seen >= 2:
+            # demo al tavolo: avviso chiaro e prevedibile su quel lato appena l'auto è vicina
+            # (rosso sotto --near-red, ambra sotto --near-amber, in cm veri), da qualunque parte arrivi
+            dcm = tr.d * 100
+            s = max(s, 1.1 if dcm < a.near_red else 0.5 if dcm < a.near_amber else 0.0)
         tr.score = s
         new = 2 if s >= 1.0 else 1 if s >= 0.35 else 0
         if new >= tr.level:
@@ -601,10 +627,10 @@ class Estimator:
                 self.counts["sorpassi"] += 1
                 if tr.clear < a.pass_safe:
                     self.counts["sorpassi_stretti"] += 1
-                self.last_pass = {"t": time.time(), "cm": round(tr.clear * 100 / a.scale), "pred": fin(tr.clear_pred, 2),
+                self.last_pass = {"t": time.time(), "cm": round(tr.clear * 100), "pred": fin(tr.clear_pred, 2),
                                   "veicolo": tr.name, "durata": 0, "fonte": "camera"}
                 self.log.add("sorpasso", veicolo=tr.name, id=tr.id, livello=tr.level,
-                             sorpasso_misurato_m=round(tr.clear / a.scale, 2), distanza_m=fin(tr.d, 1),
+                             sorpasso_misurato_m=round(tr.clear, 2), distanza_m=fin(tr.d, 1),
                              note="visto dalla camera")
 
     def calibrate(self, tr, us_ref, t):
@@ -652,7 +678,8 @@ class Estimator:
             # stessa direzione: da vicino vale l'ultrasuono (preciso), da lontano la camera
             near_tr = min((tr for tr in self.tracks.values()
                            if cam_ok and tr.zone == "B" and t - tr.last_t <= a.stale
-                           and not (tr.cls == 0 and a.scale < 1.0)),  # in scala una persona vera falsa la misura
+                           and not (tr.cls == 0 and a.scale < 1.0)  # in scala una persona vera falsa la misura
+                           and math.isfinite(tr.d) and tr.d > 0),  # riquadro tagliato appena comparso: niente distanza
                           key=lambda tr: tr.d, default=None)
             self.calibrate(near_tr, us_ref, t)
             cam_cm = near_tr.d * 100 if near_tr else None
@@ -670,6 +697,8 @@ class Estimator:
                 w_us, cm = 0.0, cam_cm
             else:
                 w_us, cm = None, None
+            if cm is not None and not math.isfinite(cm):
+                w_us, cm = None, None
             if cm is not None:
                 # velocità con lo stesso peso della distanza; se ne manca una vale l'altra
                 if us_v is not None and cam_v is not None:
@@ -680,7 +709,7 @@ class Estimator:
                 self.fused = {"cm": round(cm), "w_us": round(w_us, 2),
                               "cam_cm": fin(cam_cm, 0), "us_cm": fin(us_cm, 0),
                               "v_cms": fin(v, 1), "v_us": fin(us_v, 1), "v_cam": fin(cam_v, 1),
-                              "kmh_real": fin(v * 0.036 / a.scale, 1) if v is not None else None,
+                              "kmh_real": fin(v * 0.036, 1) if v is not None else None,
                               "ttc": fin(ttc, 1), "cam_k": round(self.cam_k, 3),
                               "cam_raw_cm": fin(near_tr.d_raw * 100, 0) if near_tr else None}
                 near = 2 if cm < a.near_red else 1 if cm < a.near_amber else 0
@@ -692,6 +721,8 @@ class Estimator:
     def relevant(self, tr):
         """Va disegnato e mostrato: visto da almeno 3 fotogrammi, non si allontana, e ci sta raggiungendo
         (o è già un avviso, o è fermo incollato dietro). I veicoli che superiamo noi non compaiono."""
+        if self.a.giocattolo:
+            return tr.n_seen >= 2  # al tavolo c'è solo l'auto giocattolo: si vede sempre
         if tr.n_seen < 3 or tr.receding:
             return tr.level > 0
         return tr.from_behind or tr.level > 0 or (tr.zone == "B" and tr.d < self.a.tailgate * self.a.scale)
@@ -1113,6 +1144,9 @@ class Detector:
             from fari import Headlights
             self.fari = Headlights()
         print(f"[modello] {self.name}, ingresso {self.imgsz}, tracker {kind}, notte {a.night}")
+        self.toy_box, self.toy_miss = None, 99
+        if a.giocattolo:
+            print(f"[giocattolo] {a.giocattolo:g} cm: seguo solo l'auto (rossa), persone e braccia ignorate")
 
     def detect(self, frame, roi):
         x0, y0, x1, y1 = roi
@@ -1138,7 +1172,85 @@ class Detector:
             yb = [(d[2] - x0, d[3] - y0, d[4] - x0, d[5] - y0) for d in dets]
             dets += [(tid, 2, bx1 + x0, by1 + y0, bx2 + x0, by2 + y0, 0.3)
                      for tid, bx1, by1, bx2, by2 in self.fari.detect(raw, yb)]
+        if self.a.giocattolo:
+            return self._toy(raw, x0, y0, dets)
         return dedupe(dets)
+
+    def _toy(self, raw, x0, y0, dets):
+        """Demo al tavolo: c'è una sola auto ed è rossa. YOLO dice "è un'auto", il colore dice esattamente dove:
+        il riquadro rosso è preciso al pixel, non trema e non include mai il braccio di chi la spinge."""
+        import numpy as np
+        H, W = raw.shape[:2]
+        small = cv2.resize(raw, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
+        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+        h, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        m = (((h < 9) | (h > 170)) & (sat > 110) & (val > 60)).astype(np.uint8) * 255
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        # i parafanghi e la carrozzeria sono pezzi separati: si uniscono in un'unica auto
+        k = max(5, W // 80)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(cv2.dilate(m, np.ones((k, k), np.uint8)))
+        cars = []
+        for i in range(1, n):
+            ys, xs = np.nonzero((lab == i) & (m > 0))
+            if len(xs) < 120:
+                continue
+            bx1, by1, bx2, by2 = xs.min() * 2, ys.min() * 2, xs.max() * 2 + 2, ys.max() * 2 + 2
+            cars.append((len(xs), (bx1 + x0, by1 + y0, bx2 + x0, by2 + y0)))
+        # i due parafanghi sono separati dalla griglia gialla: si uniscono i pezzi rossi affiancati
+        merged = True
+        while merged and len(cars) > 1:
+            merged = False
+            for i in range(len(cars)):
+                for j in range(i + 1, len(cars)):
+                    (ai, a), (aj, b) = cars[i], cars[j]
+                    hmax = max(a[3] - a[1], b[3] - b[1])
+                    gap = max(b[0] - a[2], a[0] - b[2], 0)
+                    vov = min(a[3], b[3]) - max(a[1], b[1])
+                    if gap < 0.9 * hmax and vov > 0.3 * min(a[3] - a[1], b[3] - b[1]):
+                        u = (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+                        cars = [c for k, c in enumerate(cars) if k not in (i, j)] + [(ai + aj, u)]
+                        merged = True
+                        break
+                if merged:
+                    break
+        veh = [d for d in dets if d[1] in (1, 2, 3, 5, 7)]
+
+        def overlap(b, d):
+            ix = max(0, min(b[2], d[4]) - max(b[0], d[2]))
+            iy = max(0, min(b[3], d[5]) - max(b[1], d[3]))
+            return ix * iy / max(1, (b[2] - b[0]) * (b[3] - b[1]))
+
+        best, conf = None, None
+        # 1) zona rossa confermata da YOLO ("auto" nello stesso posto)
+        for area, b in sorted(cars, reverse=True):
+            ok = [d for d in veh if overlap(b, d) > 0.3]
+            if ok:
+                best, conf = b, max(d[6] for d in ok)
+                break
+        # 2) YOLO la perde un attimo (coperta dal braccio, girata): la zona rossa più vicina all'ultima posizione
+        if best is None and self.toy_box is not None and self.toy_miss < 12 and cars:
+            lb = self.toy_box
+            lc = ((lb[0] + lb[2]) / 2, (lb[1] + lb[3]) / 2)
+            dist = lambda b: math.hypot((b[0] + b[2]) / 2 - lc[0], (b[1] + b[3]) / 2 - lc[1])
+            b = min((b for _, b in cars), key=dist)
+            if dist(b) < 1.2 * max(lb[2] - lb[0], lb[3] - lb[1]):
+                best, conf = b, 0.3
+        # 3) YOLO non la riconosce (molto vicina, inquadratura strana): una grande zona rossa a forma d'auto basta,
+        # al tavolo l'unica cosa rossa è la macchinina
+        if best is None and cars:
+            area, b = max(cars)
+            ar = (b[2] - b[0]) / max(1, b[3] - b[1])
+            if area >= 700 and 0.8 <= ar <= 4.0:
+                best, conf = b, 0.25
+        if best is None:
+            self.toy_miss += 1
+            return []
+        self.toy_box, self.toy_miss = best, 0
+        bx1, by1, bx2, by2 = best
+        bw, bh = bx2 - bx1, by2 - by1
+        # dalla parte rossa all'auto intera: sopra il tettuccio, sotto le ruote (proporzioni della macchinina)
+        full = (max(x0, bx1 - 0.02 * bw), max(y0, by1 - 0.30 * bh), min(x0 + W, bx2 + 0.02 * bw), min(y0 + H, by2 + 0.14 * bh))
+        return [(1, 2) + tuple(float(v) for v in full) + (round(conf, 2),)]
 
 
 # ---------------------------------------------------------------- video annotato e clip
@@ -1170,6 +1282,8 @@ def draw(frame, est, roi, zones, fps, t):
         cv2.putText(img, lab, (x1 + 3, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.55, c, 2)
     # vista camera: la sinistra del ciclista è a DESTRA nell'immagine
     names = [("DX", zones["R"]), ("DIETRO", zones["B"]), ("SX", zones["L"])]
+    if est.a.mirror:
+        names.reverse()
     for i, (n, lvl) in enumerate(names):
         x = 10 + i * 130
         cv2.rectangle(img, (x, 10), (x + 120, 40), LEVEL_BGR[lvl] if lvl else (60, 60, 60), -1)
@@ -1430,7 +1544,7 @@ def main():
                 "id": tr.id, "cls": tr.name, "d": fin(tr.d, 3), "d_raw": fin(tr.d_raw, 3), "conf": tr.conf,
                 "lat": fin(tr.lat), "lat_pass": fin(tr.lat_pass),
                 "ttc": fin(tr.ttc, 1), "clear": fin(tr.clear), "level": tr.level, "zone": tr.zone,
-                "edge": tr.edge, "w": tr.width_m, "len": tr.length_m,
+                "edge": tr.edge, "w": tr.width_m * a.scale, "len": tr.length_m * a.scale,
             } for tr in est.tracks.values() if t_scene - tr.last_t <= a.stale and est.relevant(tr)]
             with S.lock:
                 helmet = dict(S.helmet)

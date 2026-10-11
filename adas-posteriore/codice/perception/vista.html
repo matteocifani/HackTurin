@@ -40,6 +40,17 @@
   .lab.l2 { background: var(--red); color: #fff; }
   #edge { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .2s;
     box-shadow: inset 0 0 26px 0 var(--red); }
+  /* lato dell'avviso: una banda luminosa sul bordo dello schermo con la freccia, impossibile da non vedere */
+  .side { position: fixed; top: 0; bottom: 0; width: 34%; pointer-events: none; opacity: 0; transition: opacity .15s;
+    display: flex; align-items: center; font-size: 64px; font-weight: 800; color: #fff; }
+  #sideL { left: 0; justify-content: flex-start; padding-left: 10px; }
+  #sideR { right: 0; justify-content: flex-end; padding-right: 10px; }
+  #sideL.l1 { background: linear-gradient(90deg, rgba(255,176,32,.55), rgba(255,176,32,0)); }
+  #sideR.l1 { background: linear-gradient(270deg, rgba(255,176,32,.55), rgba(255,176,32,0)); }
+  #sideL.l2 { background: linear-gradient(90deg, rgba(255,59,59,.75), rgba(255,59,59,0)); animation: blink .45s steps(2) infinite; }
+  #sideR.l2 { background: linear-gradient(270deg, rgba(255,59,59,.75), rgba(255,59,59,0)); animation: blink .45s steps(2) infinite; }
+  .side span { text-shadow: 0 2px 12px rgba(0,0,0,.5); }
+  @keyframes blink { 50% { opacity: .45; } }
   #tap { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; background: rgba(20, 23, 28, .86); color: #fff; font-size: 22px; font-weight: 600; text-align: center; padding: 24px; }
   #tap small { color: #9aa3ae; font-size: 14px; font-weight: 400; max-width: 300px; }
@@ -49,6 +60,8 @@
 <body>
 <div id="labels"></div>
 <div id="edge"></div>
+<div class="side" id="sideL"><span>‹</span></div>
+<div class="side" id="sideR"><span>›</span></div>
 <div id="top">
   <div id="big"></div>
   <div id="mid"><div id="msg" class="off">In attesa del Raspberry…</div><div id="sub"></div></div>
@@ -75,7 +88,8 @@
 //   /vista?mezzo=auto   forza il proprio mezzo (bici, monopattino, auto, furgone, camion, bus)
 //   /vista?tema=chiaro  colori chiari, come la Tesla di giorno
 //   /vista?pi=http://172.20.10.2:8000   legge da un altro indirizzo (la Pi manda già l'header CORS)
-window.onerror = (m) => { document.getElementById("err").textContent = "Errore: " + m; };
+// gli errori si vedono solo con ?debug (Safari ogni tanto segnala un generico "Script error." che non blocca nulla)
+if (location.search.includes("debug")) window.onerror = (m) => { document.getElementById("err").textContent = "Errore: " + m; };
 const Q = new URLSearchParams(location.search);
 const DEMO = Q.has("demo");
 const BASE = Q.get("pi") || "";
@@ -461,23 +475,26 @@ function resize() {
 addEventListener("resize", resize);
 
 // distanza reale dietro di te -> z della scena: vera da vicino, compressa da lontano per stare nell'inquadratura
-const zOf = (d) => (d <= 5 ? -d : -(5 + 5.5 * (1 - Math.exp(-(d - 5) / 10))));
+// (il modellino intero, lungo 4,5 m, deve restare sempre dentro lo schermo anche a 40 m o a 60 cm sul tavolo)
+const zOf = (d) => (d <= 4 ? -d : -(4 + 4.5 * (1 - Math.exp(-(d - 4) / 8))));
 
 // ---------------------------------------------------------------- veicoli rilevati
 const objs = new Map();
 const glowSprite = new T.SpriteMaterial({ map: HALO, transparent: true, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false });
-function newObj(t) {
+// tutti i veicoli che arrivano da dietro hanno la stessa forma e misura: non cambiano mentre si muovono
+const VW = 1.8, VL = 4.5;
+function newObj() {
   const body = new T.MeshPhysicalMaterial({ color: C.car, roughness: 0.45, metalness: 0.0, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.55, transparent: true });
   const glass = new T.MeshPhysicalMaterial({ color: C.glass, roughness: 0.15, metalness: 0.2, transparent: true });
-  const w = t.w || 1.8, len = t.len || 4.5;
-  const g = makeVehicle(t.cls, w, len, body, glass);
+  const w = VW, len = VL;
+  const g = makeVehicle("auto", w, len, body, glass);
   const sh = shadowBlob(w * 1.45 + 0.3, len * 1.2 + 0.3); sh.position.z = len / 2; g.add(sh);
   const halo = glowPlane(HALO, w + 2.2, len + 2.2); halo.position.z = len / 2; g.add(halo);
   const spr = new T.Sprite(glowSprite.clone()); spr.material.opacity = 0;
   spr.scale.set(w * 2.6, w * 2.0, 1); spr.position.set(0, 1.0, len / 2); g.add(spr);
   scene.add(g);
   const lab = document.createElement("div"); lab.className = "lab"; lab.style.display = "none"; $("labels").appendChild(lab);
-  return { g, body, glass, halo, spr, sh, lab, len, w, cls: t.cls, a: 0, x: null, z: null };
+  return { g, body, glass, halo, spr, sh, lab, len, w, a: 0, x: null, z: null, seenAt: 0 };
 }
 function dropObj(id, o) { scene.remove(o.g); o.lab.remove(); objs.delete(id); }
 
@@ -522,11 +539,7 @@ function frame(now) {
   const seen = new Set();
   if (conn) {
     for (const t of S.tracks) {
-      if (!NAME[t.cls]) continue;
-      seen.add(t.id);
-      let o = objs.get(t.id);
-      if (o && o.cls !== t.cls) { dropObj(t.id, o); o = null; }   // il tracker ha cambiato idea sulla classe
-      if (!o) { o = newObj(t); objs.set(t.id, o); }
+      if (t.cls === "persona") continue;  // chi presenta non è un veicolo
       // distanze e laterali sono nella scala della scena (macchinina): riportati in metri veri
       const dReal = (t.d != null ? t.d : MAX_D * scale) / scale;
       let x, z;
@@ -534,27 +547,40 @@ function frame(now) {
         // ti sta affiancando: di fianco a te, dal lato giusto, alla distanza laterale misurata
         const sgn = t.zone === "R" ? -1 : t.zone === "L" ? 1 : 0;
         const clear = t.clear != null ? Math.max(0.3, t.clear / scale) : 1.2;
-        x = sgn * (ew / 2 + Math.min(clear, 3.5) + o.w / 2);
+        x = sgn * (ew / 2 + Math.min(clear, 3.0) + VW / 2);
         z = -Math.min(dReal, 2.5);
       } else {
         x = (t.lat || 0) / scale;          // lat > 0 = alla tua sinistra
-        z = zOf(dReal) - o.len;            // d è misurata al muso dell'altro veicolo
+        z = zOf(dReal) - VL;               // d è misurata al muso dell'altro veicolo
       }
+      let o = objs.get(t.id);
+      if (!o) {
+        // il tracker a volte cambia numero allo stesso veicolo: se c'è un modellino appena perso lì vicino,
+        // lo riprende quello invece di farne nascere un altro
+        let best = null, bd = 6;
+        for (const [id, p] of objs) {
+          if (seen.has(id) || now - p.seenAt > 1500) continue;
+          const dd = Math.hypot(p.x - x, p.z - z);
+          if (dd < bd) { bd = dd; best = id; }
+        }
+        if (best != null) { o = objs.get(best); objs.delete(best); }
+        else o = newObj();
+        objs.set(t.id, o);
+      }
+      seen.add(t.id);
       if (o.x == null) { o.x = x; o.z = z; }
-      const al = 1 - Math.exp(-dt / 0.06);
-      o.x += (x - o.x) * al; o.z += (z - o.z) * al;
-      o.t = t;
+      // movimento levigato: in avanti segue in fretta, di lato più piano (il laterale stimato è il più rumoroso)
+      o.x += (x - o.x) * (1 - Math.exp(-dt / 0.22));
+      o.z += (z - o.z) * (1 - Math.exp(-dt / 0.12));
+      o.t = t; o.seenAt = now;
     }
   }
   placed.length = 0;
   for (const [id, o] of [...objs].sort((a, b) => a[1].z - b[1].z)) {  // prima i più vicini alla telecamera
-    o.a = seen.has(id) ? Math.min(1, o.a + dt * 3) : o.a - dt * 2.5;
+    o.a = seen.has(id) ? Math.min(1, o.a + dt * 3) : now - o.seenAt > 500 ? o.a - dt * 2 : o.a;  // perso: resta un attimo, poi sfuma
     if (o.a <= 0) { dropObj(id, o); continue; }
     const t = o.t, lvl = t.level || 0;
     o.g.position.set(o.x, 0, o.z);
-    // un po' di imbardata se sta cambiando corsia verso il punto di sorpasso
-    const yaw = !t.edge && t.lat_pass != null ? Math.max(-0.25, Math.min(0.25, (t.lat_pass / scale - o.x) / Math.max(4, -o.z))) : 0;
-    o.g.rotation.y += (yaw - o.g.rotation.y) * Math.min(1, dt * 4);
     const col = lvl ? RISK[lvl] : new T.Color(C.car);
     o.body.color.lerp(col, Math.min(1, dt * 10));
     o.body.emissive.copy(lvl === 2 ? RISK[2] : new T.Color(0)).multiplyScalar(lvl === 2 ? 0.35 * pulse : 0);
@@ -566,8 +592,8 @@ function frame(now) {
     // etichetta: tempo all'impatto e distanza laterale o dietro
     const parts = [];
     if (lvl && t.ttc != null && t.ttc >= 0 && t.ttc < 30) parts.push(t.ttc.toFixed(1).replace(".", ",") + " s");
-    if (lvl && (t.edge || t.zone !== "B") && t.clear != null) parts.push("↔ " + (t.clear / scale).toFixed(1).replace(".", ",") + " m");
-    else if (lvl && t.d != null) parts.push(fmtD(t.d / scale));
+    if (lvl && (t.edge || t.zone !== "B") && t.clear != null) parts.push("↔ " + fmtD(t.clear, scale));
+    else if (lvl && t.d != null) parts.push(fmtD(t.d, scale));
     if (parts.length && o.a > 0.5) tmpV.set(o.x, ({ bus: 3.1, camion: 3.3, furgone: 2.3 }[t.cls] || 1.6) + 0.6, o.z + o.len / 2).project(camera);
     if (parts.length && o.a > 0.5 && tmpV.z < 1) {
       const off = tmpV.y < -0.95;  // ancora fuori inquadratura in basso: freccia sul bordo
@@ -590,7 +616,7 @@ function frame(now) {
   // ultrasuono senza veicolo in linea visto dalla camera
   const usCm = conn ? (S.fused && S.fused.cm != null ? S.fused.cm : S.us_cm) : null;
   const inline = [...objs.values()].some((o) => o.t && o.t.zone === "B" && !o.t.edge && o.a > 0.5);
-  ghost.visible = !!(conn && S.us_side === "B" && usCm != null && !inline);
+  ghost.visible = false;  // niente sagome senza forma: si vede solo ciò che la camera traccia
   if (ghost.visible) {
     ghost.position.z = zOf(usCm / 100 / scale) - 1.4;
     ghostMat.color.set(S.near ? (S.near === 2 ? 0xff3b3b : 0xffb020) : C.car);
@@ -600,7 +626,9 @@ function frame(now) {
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
-const fmtD = (m) => (m < 10 ? m.toFixed(1).replace(".", ",") : Math.round(m)) + " m";
+// misure vere: in cm sulla demo da tavolo, in metri su strada
+const fmtD = (m, scale) => (scale < 1 || m < 1 ? Math.round(m * 100) + " cm"
+  : (m < 10 ? m.toFixed(1).replace(".", ",") : Math.round(m)) + " m");
 
 // ---------------------------------------------------------------- testo, suono, vibrazione
 function hud(now, conn, z, scale, kind) {
@@ -616,18 +644,25 @@ function hud(now, conn, z, scale, kind) {
   } else if (!S.cam_ok) { msg.className = "l1"; msg.textContent = "Camera assente"; sub = "solo ultrasuono"; }
   else { msg.className = "ok"; msg.textContent = "Strada libera"; }
   $("sub").textContent = sub;
-  $("edge").style.opacity = conn && max === 2 ? 0.55 : 0;
+  $("edge").style.opacity = conn && z.B === 2 ? 0.55 : 0;  // dietro: bordo rosso; ai lati: la banda del lato
+  for (const k of ["L", "R"]) {
+    const el = $("side" + k), lv = conn ? z[k] : 0;
+    el.className = "side" + (lv ? " l" + lv : "");
+    el.style.opacity = lv ? 1 : 0;
+  }
 
   if (conn && max > prevMax && navigator.vibrate) navigator.vibrate(max === 2 ? [120, 60, 120] : 60);
   if (conn && max === 2 && audio && now > beepAt) { beep(z.B === 2 ? 1500 : 2400); beepAt = now + 320; }
   prevMax = conn ? max : 0;
 
-  const k = conn && S.fused && S.fused.kmh_real != null && S.fused.kmh_real > 1 ? Math.round(S.fused.kmh_real) : null;
-  $("big").innerHTML = k != null ? `<div class="n">${k}</div><div class="u">KM/H</div><div class="u">avvicinamento</div>` : "";
+  const toy = conn && scale < 1;
+  const k = toy ? (S.fused && S.fused.v_cms != null && S.fused.v_cms > 1 ? Math.round(S.fused.v_cms) : null)
+    : (conn && S.fused && S.fused.kmh_real != null && S.fused.kmh_real > 1 ? Math.round(S.fused.kmh_real) : null);
+  $("big").innerHTML = k != null ? `<div class="n">${k}</div><div class="u">${toy ? "CM/S" : "KM/H"}</div><div class="u">avvicinamento</div>` : "";
   const nome = conn && S.mezzo ? S.mezzo.nome : kind;
   $("right").innerHTML = conn
     ? `<span class="dot on"></span><b>${nome}</b><br>${DEMO ? "demo" : `${S.fps} fps · ${Math.round((S.lat_ms || 0) + rtt / 2 + 20)} ms`}`
-      + (scale < 1 ? `<br>scala 1:${Math.round(1 / scale)}` : "")
+      + (toy ? "<br>demo da tavolo" : "")
     : `<span class="dot"></span>non collegato`;
 }
 function beep(freq) {

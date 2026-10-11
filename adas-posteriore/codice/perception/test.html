@@ -131,7 +131,7 @@ async function tick() {
   setCard("cam", camM, S.cam_ok ? "niente in linea" : "camera ferma");
   $("cams").textContent = ct ? `${ct.cls}${ct.conf != null ? " " + Math.round(ct.conf * 100) + "%" : ""}${ct.ttc != null ? " · TTC " + ct.ttc + " s" : ""} · dalla larghezza` +
     (S.cal && S.cal.on && S.cal.k !== 1 ? `, calibrata ×${S.cal.k.toFixed(2)}` : "") +
-    (S.scale && S.scale !== 1 ? ` (scala ${S.scale})` : "") : `${S.fps} fps · ${(S.tracks || []).length} oggetti visti`;
+    "" : `${S.fps} fps · ${(S.tracks || []).length} oggetti visti`;
 
   // ultrasuono
   const usM = S.has_us && S.us_cm != null ? S.us_cm / 100 : null;
@@ -172,7 +172,7 @@ async function tick() {
   $("vv").textContent = fv == null ? "-" : sp(fv);
   $("vv").style.color = fv == null ? "var(--muted)" : fv > 1 ? "var(--fg)" : "var(--muted)";
   $("vreal").textContent = F && F.kmh_real != null && fv > 1 ?
-    (S.scale && S.scale !== 1 ? `≈ ${F.kmh_real.toFixed(0)} km/h in scala reale (1:${Math.round(1 / S.scale)})` : `${F.kmh_real.toFixed(1)} km/h`) : "";
+    `${F.kmh_real.toFixed(1)} km/h` : "";
   $("vsub").textContent = !F ? "serve --us-side B" :
     `camera ${sp(F.v_cam)} · ultrasuono ${sp(F.v_us)}` + (F.ttc != null ? ` · impatto tra ${F.ttc} s` : "") +
     (fv != null && fv <= 1 ? " · non si avvicina" : "");
