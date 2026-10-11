@@ -25,6 +25,7 @@ import { Avviso } from '@/components/ds/avviso'
 import { CHART_AXIS_TICK, CHART_GRID, ChartCard, ChartTip, LegendPill } from '@/components/ds/chart-frame'
 import { DataTable } from '@/components/ds/data-table'
 import { EmptyState } from '@/components/ds/empty-state'
+import { InfoDot } from '@/components/ds/info-dot'
 import { FacetToolbar, type FacetSpec } from '@/components/ds/facet-toolbar'
 import { BarraParti } from '@/components/ds/grafico-barra-parti'
 import { KpiCard, KpiGrid } from '@/components/ds/kpi-card'
@@ -392,10 +393,10 @@ export default function PaginaComune() {
         />
       </KpiGrid>
 
-      <div className='grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]'>
-        <SectionCard title='Mappa' info='Clic su un evento per i dettagli. Posizione dei caschi SIMULATA (percorso predefinito).'>
+      <div className='grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]'>
+        <SectionCard title='Mappa' info={<InfoDot label='Come leggere la mappa'>Clic su un evento per i dettagli. Posizione dei caschi SIMULATA (percorso predefinito, nessun GPS).</InfoDot>}>
           <Mappa
-            className='h-[46vh] min-h-[340px]'
+            className='h-[52vh] min-h-[380px]'
             eventi={filtrati}
             freschi={freschi}
             dispositivi={dispositivi}
@@ -405,7 +406,7 @@ export default function PaginaComune() {
           />
         </SectionCard>
         <div className='flex min-w-0 flex-col gap-6'>
-          <SectionCard title='Caschi' info='Heartbeat ogni 5 s; online se visto negli ultimi 15 s.'>
+          <SectionCard title='Caschi' info={<InfoDot label='Stato dei caschi'>Heartbeat ogni 5 s; un casco è online se visto negli ultimi 15 s.</InfoDot>}>
             {dispositivi.length === 0 ? (
               <EmptyState compatto testo='Nessun casco ha mai inviato heartbeat.' />
             ) : (
@@ -415,7 +416,7 @@ export default function PaginaComune() {
                     <div className='flex items-center justify-between gap-2'>
                       <span className='font-mono text-xs font-semibold'>{d.device_id}</span>
                       <StatusBadge tone={d.online ? 'success' : 'muted'} dot size='sm'>
-                        {d.online ? 'online' : `offline · ${d.seconds_ago}s fa`}
+                        {d.online ? 'online' : `offline · ${Math.round(d.seconds_ago)} s fa`}
                       </StatusBadge>
                     </div>
                     <div className='text-muted-foreground text-xs'>
@@ -429,7 +430,7 @@ export default function PaginaComune() {
           </SectionCard>
           <SectionCard
             title='Top 10 hotspot'
-            info='Somma delle severità per cella di ~100 m nel periodo, falsi positivi esclusi. Clic per inquadrare.'
+            info={<InfoDot label='Come si calcola'>Somma delle severità per cella di ~100 m nel periodo, falsi positivi esclusi. Clic su una riga per inquadrare.</InfoDot>}
           >
             {hotspots.length === 0 ? (
               <EmptyState compatto testo='Nessun dato nel periodo.' />
@@ -480,7 +481,7 @@ export default function PaginaComune() {
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
-        <SectionCard title='Fasce orarie' info='Quando avvengono gli eventi del periodo (ora locale del server).'>
+        <SectionCard title='Fasce orarie' info={<InfoDot label='Fasce orarie'>Quando avvengono gli eventi del periodo (ora locale del server), falsi positivi esclusi.</InfoDot>}>
           <BarraParti parti={fasce} />
         </SectionCard>
       </div>

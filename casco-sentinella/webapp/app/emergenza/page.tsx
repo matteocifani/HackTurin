@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { Vivo } from '@/components/casco/vivo'
 import { Avviso } from '@/components/ds/avviso'
 import { EmptyState } from '@/components/ds/empty-state'
+import { InfoDot } from '@/components/ds/info-dot'
 import { Interruttore } from '@/components/ds/interruttore'
 import PageHeader from '@/components/ds/page-header'
 import { Scelta } from '@/components/ds/scelta'
@@ -181,7 +182,7 @@ export default function PaginaEmergenza() {
       />
 
       <div className='grid gap-4 xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]'>
-        <SectionCard title={`Coda segnalazioni · ${coda.length}`} info='Più recenti in alto. Rosso = allarme inviato (priorità alta).'>
+        <SectionCard title={`Coda segnalazioni · ${coda.length}`} info={<InfoDot label='Legenda della coda'>Più recenti in alto. Bordo rosso = allarme inviato (priorità alta).</InfoDot>}>
           {coda.length === 0 ? (
             <EmptyState compatto testo='Nessuna segnalazione nel periodo.' />
           ) : (

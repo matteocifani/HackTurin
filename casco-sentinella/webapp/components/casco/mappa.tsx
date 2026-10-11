@@ -146,7 +146,11 @@ function StratoCalore({ punti }: { punti: Array<[number, number, number]> }) {
   const map = useMap()
   const ref = useRef<L.HeatLayer | null>(null)
   useEffect(() => {
-    const layer = L.heatLayer([], { radius: 22, blur: 18, maxZoom: 16 }).addTo(map)
+    // leaflet.heat si aggancia all'oggetto globale window.L (lo stesso che Leaflet esporta a runtime),
+    // non al namespace ESM che il bundler consegna a questo modulo: si passa quindi dal globale.
+    const globale = (globalThis as unknown as { L?: typeof L }).L
+    const heatLayer = globale?.heatLayer ?? L.heatLayer
+    const layer = heatLayer([], { radius: 22, blur: 18, maxZoom: 16 }).addTo(map)
     ref.current = layer
     return () => {
       layer.remove()

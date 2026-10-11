@@ -45,7 +45,7 @@ export function ShellCasco({ children }: { children: ReactNode }) {
     <AppShell
       brand={<Marchio />}
       nav={nav}
-      groupLabel='Casco Sentinella'
+      groupLabel='Monitoraggio'
       current={corrente.title}
       headerActions={
         <StatusBadge tone='warning' variant='bordata' size='sm'>
