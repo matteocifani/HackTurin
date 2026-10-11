@@ -3,6 +3,7 @@ import socket
 import time
 
 from arduino.app_utils import *
+import uplink
 from protocol import parse
 
 PORT = 5005  # TCP: the app container only publishes TCP ports (ports: in app.yaml)
@@ -30,9 +31,10 @@ print("listening on TCP", PORT, "DEBUG_RED", DEBUG_RED)
 
 
 def on_alert(kind, value, ms):
-    """Fall detection from the sketch: "IMPACT" (value = dRMS mg) or "FALL" (value = tilt deg).
-    Runs in the Bridge thread: print only. Forwarding to the Pi is still to be decided."""
+    """Fall detection from the sketch: "IMPACT" (value = dRMS mg), "FALL" or "NOFALL" (value = tilt deg).
+    Runs in the Bridge thread: no I/O, uplink only queues the event for its worker thread."""
     print("alert", kind, value, "mcu_ms", ms)
+    uplink.on_alert(kind, value)
 
 
 def on_log(msg, value, ms):
@@ -98,9 +100,12 @@ def loop():
             if cur != sent:
                 print("state", cur)
             sent, last_sent = cur, now
+            uplink.mcu_ok = True
         except Exception as e:  # MCU not answering: retry on the next loop
+            uplink.mcu_ok = False
             print("bridge error", type(e).__name__, e)
             time.sleep(1)  # do not hammer the router while the MCU is down
 
 
+uplink.start()
 App.run(user_loop=loop)

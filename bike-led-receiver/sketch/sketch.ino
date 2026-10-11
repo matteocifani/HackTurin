@@ -122,6 +122,7 @@ static void logEv(const char* msg, float v) {
 // Avviso al Linux della scheda (Python: handler "alert").
 //   "IMPACT": prima parte (dRMS sopra soglia). value = dRMS in mg
 //   "FALL"  : allarme di caduta.               value = inclinazione in gradi
+//   "NOFALL": caduta senza allarme (si e' mossa). value = inclinazione in gradi
 static void alertLinux(const char* type, int value) {
   Bridge.notify("alert", String(type), value, (uint32_t)millis());
   resync = true;
@@ -181,6 +182,7 @@ void fallStep() {
           alertLinux("FALL", (int)tiltAng);                 // allarme di caduta
         } else {
           logEv("NO ALARM (si e' mossa), dt[ms]=", dt);
+          alertLinux("NOFALL", (int)tiltAng);               // caduta senza allarme
         }
         st = NORMAL;
       }
