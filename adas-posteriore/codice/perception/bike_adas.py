@@ -279,14 +279,23 @@ class Track:
         self.lw = AlphaBeta(0.5, 0.1, 0.3)  # log della larghezza del riquadro, levigato
         self.lh = AlphaBeta(0.5, 0.1, 0.3)  # idem per l'altezza (serve quando il riquadro è tagliato di lato)
         self.hist_h = collections.deque(maxlen=60)  # (t, altezza px) per il TTC di chi è al bordo
+        self.hist_d = collections.deque(maxlen=30)  # (t, distanza m) per controllare che si avvicini davvero
         self.alongside = False  # di fianco: uscito di lato dall'immagine, vicino
         self.passed = False
+        # chi ci raggiunge da dietro si ingrandisce; chi superiamo noi entra dal bordo e si rimpicciolisce
+        self.approach_s = 0.0  # secondi passati ad avvicinarsi
+        self.from_behind = False
+        self.receding = False
+        self.zone_raw, self.zone_n = "B", 0
+        self.n_seen = 0
+        self.disp = None  # riquadro levigato da disegnare
         self.conf = None
         self.min_d = INF
         self.lat = 0.0
         self.vlat = 0.0
         self.lat_pass = 0.0
         self.rate = None
+        self.rate_h = None
         self.ttc = INF
         self.min_ttc = INF
         self.clear = INF
@@ -351,9 +360,12 @@ class Estimator:
             tr = self.tracks.get(tid)
             if tr is None:
                 tr = self.tracks[tid] = Track(tid, cls, t)
+                self._handover(tr, (x1, y1, x2, y2), t)
             tr.vote(cls)
             tr.conf = det[6] if len(det) > 6 else None
             tr.bbox = (x1, y1, x2, y2)
+            tr.n_seen += 1
+            tr.disp = tr.bbox if tr.disp is None else tuple(0.5 * o + 0.5 * n for o, n in zip(tr.disp, tr.bbox))
             tr.last_t = t
             # un riquadro tagliato dal bordo non ha la larghezza vera: il veicolo ci sta passando di fianco
             tr.edge = x1 <= self.x_lo + a.edge_px or x2 >= self.x_hi - a.edge_px
@@ -392,11 +404,39 @@ class Estimator:
                 tr.d = tr.d_raw * self.cam_k
                 tr.min_d = min(tr.min_d, tr.d)
                 tr.hist.append((t, w, tr.lat))
+            if math.isfinite(tr.d) and tr.d > 0:
+                tr.hist_d.append((t, tr.d))
             self._estimate(tr, t)
             self._risk(tr, t)
         for tid in list(self.tracks):
             if t - self.tracks[tid].last_t > a.expire:
                 self.gone.append(self.tracks.pop(tid))
+
+    def _handover(self, tr, box, t):
+        """Lo stesso veicolo cambia spesso numero (YOLO lo perde un attimo, oppure di notte passa dai fari
+        a YOLO): se una traccia appena persa era lì, il nuovo numero eredita la sua storia di avvicinamento."""
+        bw, bh = box[2] - box[0], box[3] - box[1]
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        best = None
+        for old in list(self.tracks.values()) + list(self.gone):
+            if old is tr or old.last_t >= t or t - old.last_t > 1.2:
+                continue
+            ob = old.bbox
+            ow, oh = ob[2] - ob[0], ob[3] - ob[1]
+            dist = math.hypot(cx - (ob[0] + ob[2]) / 2, cy - (ob[1] + ob[3]) / 2)
+            # confronto sull'altezza: la larghezza cambia quando il veicolo esce di lato dall'immagine;
+            # chi si stava avvicinando può essere cresciuto parecchio nel frattempo
+            hi = 2.2 if old.approach_s > 0 else 1.7
+            if dist < 0.8 * max(bw, ow) and 0.6 < bh / max(1, oh) < hi and (best is None or dist < best[0]):
+                best = (dist, old)
+        if best:
+            old = best[1]
+            tr.approach_s, tr.from_behind, tr.min_d = old.approach_s, old.from_behind, old.min_d
+            tr.hist.extend(old.hist)
+            tr.hist_h.extend(old.hist_h)
+            tr.rate, tr.n_seen, tr.zone_ok = old.rate, old.n_seen, getattr(old, "zone_ok", old.zone)
+            tr.disp = old.disp
+            old.last_t = -1e9  # non va ereditata due volte
 
     def _estimate(self, tr, t):
         a = self.a
@@ -408,15 +448,48 @@ class Estimator:
             tr.rate = rate if tr.rate is None else 0.5 * tr.rate + 0.5 * rate
             tmid = sum(ts) / len(ts)
             tr.ttc = max(0.0, 1.0 / tr.rate - (t - tmid)) if tr.rate > 1.0 / a.ttc_max else INF
+            dt = t - getattr(tr, "est_t", t)
+            # anche l'altezza deve crescere: un veicolo che superiamo entra di lato, il riquadro si allarga
+            # mentre entra nell'immagine ma in realtà si rimpicciolisce (altezza che cala)
+            r_eff = tr.rate
+            ph = [p for p in tr.hist_h if t - p[0] <= a.window]
+            if len(ph) >= 4 and ph[-1][0] - ph[0][0] >= 0.3:
+                rh, _ = linfit([p[0] for p in ph], [math.log(p[1]) for p in ph])
+                tr.rate_h = rh if getattr(tr, "rate_h", None) is None else 0.5 * tr.rate_h + 0.5 * rh
+                r_eff = min(r_eff, tr.rate_h)
+                if tr.rate_h < -0.05:
+                    tr.ttc = INF
+            # e la distanza stimata non deve crescere (terzo controllo indipendente)
+            pd = [(p[0], p[1]) for p in tr.hist_d if t - p[0] <= 0.6]
+            if len(pd) >= 3 and pd[-1][0] - pd[0][0] >= 0.2:
+                sd, _ = linfit([p[0] for p in pd], [math.log(max(1e-3, p[1])) for p in pd])
+                r_eff = min(r_eff, -sd)
+            if r_eff > 1.0 / a.ttc_max:
+                tr.approach_s += dt
+            elif r_eff < -0.05:
+                tr.approach_s = max(0.0, tr.approach_s - 2 * dt)
+            tr.receding = r_eff < -0.05
+            # arriva da dietro: si è avvicinato per almeno mezzo secondo mentre era tutto nell'immagine
+            tr.from_behind = tr.from_behind or tr.approach_s >= 0.3
             recent = [p for p in pts if t - p[0] <= 0.5] or pts[-2:]
             if len(recent) >= 2:
                 tr.vlat, _ = linfit([p[0] for p in recent], [p[2] for p in recent])
+        tr.est_t = t
         if tr.edge:
             ph = [p for p in tr.hist_h if t - p[0] <= a.window]
-            if len(ph) >= 4 and ph[-1][0] - ph[0][0] >= 0.3:
+            if len(ph) >= 3 and ph[-1][0] - ph[0][0] >= 0.2:
                 rate, _ = linfit([p[0] for p in ph], [math.log(p[1]) for p in ph])
                 tmid = sum(p[0] for p in ph) / len(ph)
                 tr.ttc = max(0.0, 1.0 / rate - (t - tmid)) if rate > 1.0 / a.ttc_max else INF
+                # al bordo: se cresce ci sta superando (arriva da dietro), se si rimpicciolisce lo stiamo superando noi
+                dt = t - getattr(tr, "edge_est_t", t)
+                tr.edge_est_t = t
+                if rate > 1.0 / a.ttc_max:
+                    tr.approach_s += dt
+                elif rate < -0.05:
+                    tr.approach_s = max(0.0, tr.approach_s - dt)
+                tr.receding = rate < -0.05
+                tr.from_behind = tr.from_behind or tr.approach_s >= 0.3
             ln = getattr(tr, "lat_near", None)
             if ln is not None and math.isfinite(tr.d):
                 # il fianco vicino è già nell'immagine: la distanza laterale si legge direttamente
@@ -442,11 +515,23 @@ class Estimator:
                 tr.zone = "L" if tr.lat_pass > 0 else "R"
             if tr.d < 12 * a.scale:
                 tr.clear_pred = tr.clear
+        # il lato cambia solo se il nuovo lato si conferma per 3 fotogrammi (niente avvisi che saltano SX/DX)
+        raw = tr.zone
+        if raw == tr.zone_raw:
+            tr.zone_n += 1
+        else:
+            tr.zone_raw, tr.zone_n = raw, 1
+        if tr.zone_n < 3 and tr.n_seen > 3 and hasattr(tr, "zone_ok"):
+            tr.zone = tr.zone_ok
+        tr.zone_ok = tr.zone
 
     def _risk(self, tr, t):
         a = self.a
         s = 0.0
-        if tr.d <= a.max_range or tr.edge:
+        # solo chi ci raggiunge da dietro può dare un avviso: chi superiamo noi (si allontana, o compare
+        # già di fianco e poi si rimpicciolisce) non è un pericolo
+        threat = tr.from_behind and not tr.receding
+        if threat and (tr.d <= a.max_range or tr.edge):
             if tr.ttc < INF:
                 urg = clamp((a.t_warn - tr.ttc) / (a.t_warn - a.t_crit), 0.0, 1.0)
                 if tr.zone == "B":
@@ -460,6 +545,10 @@ class Estimator:
                 s = tr.weight * urg * traj
             elif tr.zone == "B" and tr.d < a.tailgate * a.scale:
                 s = 0.4 * tr.weight  # incollato dietro di te
+        elif (not tr.receding and tr.zone == "B" and not tr.edge and tr.d < a.tailgate * a.scale and tr.n_seen > 12
+              and (tr.rate_h is None or tr.rate_h > -0.05)):
+            s = 0.4 * tr.weight  # fermo e incollato dietro di te, anche se non l'hai visto arrivare
+        if threat:
             if tr.ttc < a.t_warn and tr.clear < a.pass_safe + 2.0 and tr.d <= a.max_range * max(a.scale, 0.05):
                 # sorpasso in arrivo anche se largo: almeno ambra, così sai sempre chi ti sta per affiancare
                 s = max(s, 0.4)
@@ -489,7 +578,7 @@ class Estimator:
             if self.on_red:
                 self.on_red(t, tr)
         tr.max_level = max(tr.max_level, tr.level)
-        if tr.alongside and not tr.passed and (tr.cls in MOTOR or tr.cls == 1) and tr.min_ttc < a.t_warn * 2:
+        if tr.alongside and not tr.passed and tr.from_behind and (tr.cls in MOTOR or tr.cls == 1) and tr.min_ttc < a.t_warn * 2:
             # sorpasso visto dalla camera: il veicolo arrivava da dietro ed è uscito di lato vicino a te
             tr.passed = True
             self.counts["sorpassi_camera"] = self.counts.get("sorpassi_camera", 0) + 1
@@ -579,6 +668,13 @@ class Estimator:
             near = 2 if us_cm < a.near_red else 1 if us_cm < a.near_amber else 0
         z[a.us_side] = max(z[a.us_side], near)
         return z, top, near
+
+    def relevant(self, tr):
+        """Va disegnato e mostrato: visto da almeno 3 fotogrammi, non si allontana, e ci sta raggiungendo
+        (o è già un avviso, o è fermo incollato dietro). I veicoli che superiamo noi non compaiono."""
+        if tr.n_seen < 3 or tr.receding:
+            return tr.level > 0
+        return tr.from_behind or tr.level > 0 or (tr.zone == "B" and tr.d < self.a.tailgate * self.a.scale)
 
     def mae_cm(self):
         return round(100 * sum(self.errors) / len(self.errors)) if self.errors else None
@@ -1036,16 +1132,18 @@ def draw(frame, est, roi, zones, fps, t):
     cv2.rectangle(img, (roi[0], roi[1]), (roi[2] - 1, roi[3] - 1), (90, 90, 90), 1)
     cv2.line(img, (int(est.c0), 0), (int(est.c0), H), (255, 255, 0), 1)
     for tr in est.tracks.values():
-        if t - tr.last_t > 0.2:
+        if t - tr.last_t > 0.2 or not est.relevant(tr):
             continue
-        x1, y1, x2, y2 = (int(v) for v in tr.bbox)
+        x1, y1, x2, y2 = (int(v) for v in tr.disp)
         c = LEVEL_BGR[tr.level]
         cv2.rectangle(img, (x1, y1), (x2, y2), c, 3 if tr.level else 1)
-        ttc = f"{tr.ttc:.1f}s" if tr.ttc < INF else "-"
-        conf = f" {tr.conf:.0%}" if tr.conf is not None else ""
-        lab = f"{tr.name}{conf} {fmt_d(tr.d)} TTC {ttc}"
-        if est.a.us_side != "B":
-            lab += f" sorpasso {fmt_d(tr.clear)}"
+        lab = f"{tr.name} {fmt_d(tr.d)}"
+        if tr.ttc < INF:
+            lab += f"  {tr.ttc:.1f}s"
+        if tr.level and tr.zone != "B" and tr.clear < est.a.pass_safe:
+            lab += f"  STRETTO {fmt_d(tr.clear)}"
+        elif tr.level and tr.zone == "B":
+            lab += "  IN LINEA"
         (tw, th), _ = cv2.getTextSize(lab, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         ty = max(th + 8, y1 - 6)
         cv2.rectangle(img, (x1, ty - th - 6), (x1 + tw + 6, ty + 4), (0, 0, 0), -1)
@@ -1313,7 +1411,7 @@ def main():
                 "lat": fin(tr.lat), "lat_pass": fin(tr.lat_pass),
                 "ttc": fin(tr.ttc, 1), "clear": fin(tr.clear), "level": tr.level, "zone": tr.zone,
                 "edge": tr.edge, "w": tr.width_m, "len": tr.length_m,
-            } for tr in est.tracks.values() if t_scene - tr.last_t <= a.stale]
+            } for tr in est.tracks.values() if t_scene - tr.last_t <= a.stale and est.relevant(tr)]
             with S.lock:
                 helmet = dict(S.helmet)
                 gps_ok = S.gps is not None and now - S.gps[3] < 10
