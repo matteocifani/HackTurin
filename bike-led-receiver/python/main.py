@@ -37,9 +37,15 @@ def on_alert(kind, value, ms):
     uplink.on_alert(kind, value)
 
 
+FALSE_POSITIVE = "FALSE POSITIVE"  # must match the logEv() text in sketch.ino
+
+
 def on_log(msg, value, ms):
-    """Every fall-detection event of the sketch (TILT, FALSE POSITIVE, MOVED, ...); value is in thousandths."""
+    """Every fall-detection event of the sketch (TILT, FALSE POSITIVE, MOVED, ...); value is in thousandths.
+    IMPACT followed by FALSE POSITIVE is a pothole: queued as BUCA (no I/O here, same as on_alert)."""
     print("fall-log", ms, "ms", msg, value / 1000)
+    if msg.startswith(FALSE_POSITIVE):
+        uplink.on_alert("BUCA", None)
 
 
 Bridge.provide("alert", on_alert)

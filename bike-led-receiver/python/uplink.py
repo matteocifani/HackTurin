@@ -1,4 +1,4 @@
-"""Uplink to the casco-sentinella server: fall events + heartbeat (stdlib only).
+"""Uplink to the casco-sentinella server: fall events, pothole (BUCA) events, heartbeat (stdlib only).
 
 Bridge handlers only call on_alert() (a deque append); a worker thread does the blocking HTTP.
 Server URL is re-read from server_url.txt at every request, so it can be edited without a restart.
@@ -7,6 +7,7 @@ import json
 import time
 import uuid
 from collections import deque
+from itertools import cycle
 from pathlib import Path
 from threading import Thread
 from urllib.error import HTTPError
@@ -19,33 +20,50 @@ TIMEOUT = 3          # s per HTTP request
 RETRY_S = 5          # s between attempts while the server is unreachable
 HEARTBEAT_S = 5
 MAX_AGE_S = 30       # an IMPACT older than this is not the one that caused the alert
+BUCA_COOLDOWN_S = 10  # after a BUCA, further ones inside this window are dropped (pave, tram tracks)
+# No GPS: each BUCA takes the next point, all declared simulated. >100 m apart so the server's
+# ~100 m cells keep them separate on the map.
+BUCA_POINTS = cycle([(45.0703, 7.6869), (45.0620, 7.6780), (45.0786, 7.6828),
+                     (45.0526, 7.6877), (45.0689, 7.6934)])
 
 mcu_ok = False       # set by main.py after each Bridge call
 _pending = deque(maxlen=50)  # full -> the oldest event is dropped
 _impact = None       # (monotonic, drms_mg) of the last IMPACT alert
+_last_buca = float("-inf")  # monotonic time of the last queued BUCA
 _up = {}             # endpoint -> last outcome, to log only the changes
 
 
 def on_alert(kind, value):
-    """Called from the Bridge thread: remember IMPACT, queue FALL / NOFALL."""
-    global _impact
+    """Called from the Bridge thread: remember IMPACT, queue FALL / NOFALL / BUCA.
+    BUCA = IMPACT followed by FALSE POSITIVE (value unused)."""
+    global _impact, _last_buca
     now = time.monotonic()
     if kind == "IMPACT":
         _impact = (now, value)
-    elif kind in ("FALL", "NOFALL"):
-        t0, drms = _impact if _impact and now - _impact[0] < MAX_AGE_S else (now, None)
-        _pending.append({
-            "event_id": str(uuid.uuid4()),  # the server ignores a resend with the same id
-            "device_id": DEVICE_ID,
-            "lat": LAT, "lon": LON, "position_source": "simulated_route",
-            "type": "CADUTA_SENZA_CAUSA_RILEVATA",  # we cannot tell the cause
-            "confidence": 0.5,  # conventional value, not a probability
-            "emergency": kind == "FALL",
-            "alarm_state": "SENT" if kind == "FALL" else "MOVEMENT_RESUMED",
-            "features": {"tilt_deg": value, "impact_drms_mg": drms},  # drms at trigger, not the peak
-            "classifier": "rules-v1", "simulated": False, "origin": "helmet",
-            "_t0": t0,
-        })
+        return
+    if kind not in ("FALL", "NOFALL", "BUCA"):
+        return
+    t0, drms = _impact if _impact and now - _impact[0] < MAX_AGE_S else (now, None)
+    ev = {
+        "event_id": str(uuid.uuid4()),  # the server ignores a resend with the same id
+        "device_id": DEVICE_ID,
+        "lat": LAT, "lon": LON, "position_source": "simulated_route",
+        "type": "CADUTA_SENZA_CAUSA_RILEVATA",  # we cannot tell the cause
+        "confidence": 0.5,  # conventional value, not a probability
+        "emergency": kind == "FALL",
+        "alarm_state": "SENT" if kind == "FALL" else "MOVEMENT_RESUMED",
+        "features": {"tilt_deg": value, "impact_drms_mg": drms},  # drms at trigger, not the peak
+        "classifier": "rules-v1", "simulated": False, "origin": "helmet",
+        "_t0": t0,
+    }
+    if kind == "BUCA":
+        if now - _last_buca < BUCA_COOLDOWN_S:
+            return
+        _last_buca = now
+        ev["lat"], ev["lon"] = next(BUCA_POINTS)
+        ev.update(type="BUCA", confidence=0.6, emergency=False, alarm_state="NONE",
+                  features={"impact_drms_mg": drms})  # no shock_peak_g (not in g): severity stays 1
+    _pending.append(ev)
 
 
 def _post(path, body):
@@ -135,4 +153,22 @@ if __name__ == "__main__":
     ev = [b for p, b in got if p == "/api/events"][-1]
     assert (ev["alarm_state"], ev["emergency"]) == ("MOVEMENT_RESUMED", False)
     assert ev["features"]["impact_drms_mg"] is None and ev["age_ms"] < 1000, ev
+    # BUCA: accepted shape, cooldown drops the second one, positions rotate
+    status[0] = 201
+    got.clear()
+    _impact = (time.monotonic() - 3, 640)
+    on_alert("BUCA", None)
+    on_alert("BUCA", None)                # inside the cooldown: dropped
+    time.sleep(0.5)
+    evs = [b for p, b in got if p == "/api/events"]
+    assert len(evs) == 1 and not _pending, evs
+    b = evs[0]
+    assert (b["type"], b["alarm_state"], b["emergency"]) == ("BUCA", "NONE", False), b
+    assert b["features"] == {"impact_drms_mg": 640} and 2500 <= b["age_ms"] < 4500, b
+    first = (b["lat"], b["lon"])
+    _last_buca = float("-inf")
+    on_alert("BUCA", None)
+    time.sleep(0.5)
+    b = [b for p, b in got if p == "/api/events"][-1]
+    assert (b["lat"], b["lon"]) != first
     print("ok")
