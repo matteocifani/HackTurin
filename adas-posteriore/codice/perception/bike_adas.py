@@ -370,6 +370,7 @@ class Estimator:
             # un riquadro tagliato dal bordo non ha la larghezza vera: il veicolo ci sta passando di fianco
             tr.edge = x1 <= self.x_lo + a.edge_px or x2 >= self.x_hi - a.edge_px
             ycut = y1 <= self.y_lo + a.edge_px or y2 >= self.y_hi - a.edge_px
+            tr.ycut = ycut
             hm = HEIGHTS.get(tr.cls, 1.5) * a.scale
             if not ycut:
                 hf = math.exp(tr.lh.update(math.log(max(2.0, y2 - y1)), t))
@@ -596,7 +597,11 @@ class Estimator:
         """L'ultrasuono è preciso da vicino: quando vede lo stesso oggetto della camera, nello stesso
         istante, il rapporto tra le due misure corregge la camera (focale e larghezza vera dell'oggetto)."""
         a = self.a
-        if (not a.autocal or tr is None or tr.edge or tr.last_t != t or t == self.cal_t
+        # niente calibrazione da riquadri tagliati (oggetto troppo vicino, la larghezza non è quella vera)
+        # né da persone in scala: una persona vera davanti alla camera non è "in scala 1:20"
+        if (not a.autocal or tr is None or tr.edge or getattr(tr, "ycut", False)
+                or (tr.cls == 0 and a.scale < 1.0)
+                or (tr.bbox[2] - tr.bbox[0]) > 0.6 * (self.x_hi - self.x_lo) or tr.last_t != t or t == self.cal_t
                 or us_ref is None or not 3 <= us_ref <= a.us_trust + a.us_blend or not math.isfinite(tr.d_raw)):
             return
         self.cal_t = t
@@ -632,7 +637,8 @@ class Estimator:
         if a.us_side == "B":
             # stessa direzione: da vicino vale l'ultrasuono (preciso), da lontano la camera
             near_tr = min((tr for tr in self.tracks.values()
-                           if cam_ok and tr.zone == "B" and t - tr.last_t <= a.stale),
+                           if cam_ok and tr.zone == "B" and t - tr.last_t <= a.stale
+                           and not (tr.cls == 0 and a.scale < 1.0)),  # in scala una persona vera falsa la misura
                           key=lambda tr: tr.d, default=None)
             self.calibrate(near_tr, us_ref, t)
             cam_cm = near_tr.d * 100 if near_tr else None
