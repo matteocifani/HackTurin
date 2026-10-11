@@ -1,93 +1,81 @@
-# Riprese da girare (lista per Matteo)
+# Riprese da girare (versione col case di cartone)
 
-*Domenica 11/10 mattina. Sostituisce la lista riprese in `video_2min.md`. Il nome del prodotto è ancora `[NOME]`: in scena non deve comparire scritto da nessuna parte, così va bene qualunque nome sceglierete.*
+*Domenica 11/10, 13:15. Sostituisce la versione delle 12:00. Scritta per il case di cartone: la stampa 3D non sarà pronta per il video (vedi in fondo), quindi nel video il case "vero" lo mostro io in 3D, dal vostro file STL. Le riprese dal vivo servono a dimostrare che **funziona davvero**.*
 
-## Prima di iniziare (valido per tutte le riprese)
+**Consegna dei file:** AirDrop sul Mac, nella cartella `~/Downloads/video_devpost/` (c'è già). Non rinominate niente. **Entro le 14:40**, così ho il tempo di montare.
 
-- **Telefono in orizzontale**, sempre. Fotocamera 1x (non 0,5x, deforma i bordi). Formato 4K 30 fps se c'è spazio, altrimenti 1080p 30 fps. Niente modalità Cinema, niente Live Photo.
-- **Blocca esposizione e messa a fuoco:** tieni premuto il dito sull'oggetto finché compare "Blocco AE/AF". Senza, la luce cambia quando i LED diventano rossi.
-- **Luce:** vicino a una finestra, con la finestra di lato o alle tue spalle, mai dentro l'inquadratura. Spegni le luci al neon sopra il tavolo se sfarfallano.
-- **Tavolo sgombro:** tovaglia o foglio grande di un colore unico (grigio scuro o bianco). Via cavi in più, bottiglie, zaini.
-- **Ogni presa:** parti 2 secondi prima dell'azione e chiudi 2 secondi dopo. Gira **3 prese** di ogni ripresa indispensabile.
-- **Supporto:** telefono fermo (cavalletto, pila di libri, un compagno con i gomiti appoggiati). Per i movimenti lenti usa due mani e cammina piano.
-- **Audio:** non serve, ci mettiamo la voce. Se però il buzzer suona, tieni l'audio originale: lo usiamo.
-- **Pi pronta:** servizio avviato con il modello `gs26n` e `--giocattolo 7.5` (procedura in memoria). Prima di girare, apri `/test` e controlla che la macchinina venga vista.
-- **Dove metterle:** crea sul Mac la cartella `~/Downloads/video_devpost/` e copiaci tutto con AirDrop, senza rinominare. Io le trovo lì e le monto.
+## Regole per tutte le riprese
+- **Telefono in orizzontale**, obiettivo 1x, 4K 30 fps (o 1080p 30 fps). Niente modalità Cinema.
+- **Blocca esposizione e fuoco:** dito premuto sul soggetto finché compare "Blocco AE/AF". Senza, quando i LED diventano rossi l'immagine cambia luce.
+- **Luce:** finestra di lato, mai inquadrata. Sfondo pulito: un foglio grande o un telo scuro sul tavolo, via bottiglie, zaini e cavi in più. Niente fogli con SSID e password del Wi-Fi in campo (nelle foto del casco si leggono).
+- **Telefono fermo:** cavalletto, pila di libri, o gomiti appoggiati. I movimenti sono lenti e uno solo per ripresa.
+- **2 secondi prima e 2 dopo** ogni azione. **3 prese** per le indispensabili.
+- **Audio:** lasciatelo acceso. Se si sente il bip del rosso, lo uso.
+- **Pi:** modello `gs26n`, `--giocattolo 7.5`. Prima di girare, controllate su `/test` che la macchinina venga vista.
 
 ---
 
-## Indispensabili (senza queste il video non regge)
+## Indispensabili (in ordine di importanza)
 
-### R1 · La demo: la macchinina arriva da dietro (la più importante)
-- **Inquadratura:** larga, telefono a 40–50 cm d'altezza, di tre quarti. In campo devono esserci insieme: la scatola con webcam e HC-SR04 (di spalle o di lato, si capisca che guarda verso la macchinina), il display 7" della Pi con lo schermo leggibile, e il tratto di tavolo da 70 cm a 0 dalla camera.
-- **Cosa succede:**
-  1. Macchinina ferma a ~70 cm, muso verso la camera e **dritta** (non di tre quarti). Schermo verde. 2 s.
-  2. Spingila piano e in linea retta verso la camera, in ~4 s, con un dito dietro (la mano resta fuori dal campo della webcam il più possibile).
-  3. Passa da verde ad ambra (~30 cm) e a rosso (~15 cm). Fermati a ~10 cm e tieni 2 s sul rosso.
-  4. Riportala indietro: lo schermo torna verde.
-- **Durata:** 12–15 s a presa. 3 prese.
-- **Da dove:** telefono sul cavalletto.
+### 1 · La scena chiave: macchinina, case e telefono nella stessa inquadratura
+È la ripresa che fa capire tutto in un secondo: il mondo vero e quello che vede il sistema, insieme.
+- **Inquadratura:** dal lato, telefono a 30–40 cm d'altezza. A sinistra il case di cartone con la camera rivolta verso destra. A destra il "corridoio" di tavolo da 70 cm dove arriva la macchinina. **In primo piano, appoggiato e inclinato verso l'obiettivo, l'iPhone con `/vista` aperta** (luminosità al massimo, Non disturbare attivo).
+- **Azione:** la macchinina parte da ~70 cm, dritta verso la camera, e si avvicina in ~4 s. Sull'iPhone la vista 3D passa da verde ad ambra a rosso. Si ferma a ~10 cm, 2 s di rosso, poi torna indietro e torna verde.
+- **Durata:** 12–15 s. **3 prese.**
+- **Serve un secondo telefono** per girare (l'iPhone è in scena).
 
-### R2 · Lo stesso momento sulla vista 3D dell'iPhone
-- **Cosa:** registrazione schermo dell'iPhone su `http://172.20.10.2:8000/vista` (Centro di Controllo → Registrazione schermo, microfono spento) mentre un compagno rifà la R1 identica.
-- **Serve un secondo telefono** per la R1, perché l'iPhone sta registrando lo schermo. Se non c'è, gira R1 e R2 in due momenti separati, va bene lo stesso.
-- **Prima** togli le notifiche (Full immersion "Non disturbare") e chiudi le altre schede. Batteria e ora in alto si vedono: va bene.
-- **Durata:** 15–20 s. 2 prese.
+### 2 · Registrazione dello schermo di /vista, nello stesso momento della 1
+- **Cosa:** registrazione schermo dell'iPhone su `http://172.20.10.2:8000/vista` mentre si rifà la 1. Centro di Controllo → Registrazione schermo. **Non disturbare attivo.**
+- **Perché:** in montaggio la metto a tutto schermo, nitida, accanto alla ripresa 1.
+- **Durata:** 20 s. 2 prese. Se non riuscite in contemporanea con la 1, fatela subito dopo con la stessa azione.
 
-### R3 · Sorpasso a sinistra e a destra
-- **Inquadratura:** dall'alto, telefono a 60–70 cm sopra il tavolo, guardando in giù. In campo la scatola e la corsia dietro.
-- **Cosa succede:** la macchinina arriva da dietro un po' spostata a **sinistra** della camera e passa di fianco alla scatola (dove la vede l'ultrasuono). Poi la stessa cosa a **destra**. Fai due prese separate per lato.
+### 3 · Il case di cartone da vicino: camera e sensori
+- **3a:** di fronte, come lo vede chi arriva da dietro: i due "occhi" dell'HC-SR04 sopra l'obiettivo della webcam. Avvicinamento lentissimo (10 cm in 5 s). Prima sistemate lo scotch di carta e i cavi che escono dal sensore, e controllate che il copriobiettivo della webcam sia aperto.
+- **3b:** di tre quarti, con il cavo e la Pi dietro, un po' sfocati.
+- **3c:** dall'alto, il case aperto: Pi, cavi, sensore dentro. Ferma.
+- **Durata:** 5 s ciascuna. 2 prese.
+
+### 4 · Sorpasso a sinistra e a destra, dall'alto
+- **Inquadratura:** telefono a 60–70 cm sopra il tavolo, verso il basso. In campo il case e il corridoio dietro. Se potete, l'iPhone con `/vista` appoggiato nell'angolo dell'inquadratura.
+- **Azione:** la macchinina arriva da dietro spostata a **sinistra**, passa di fianco al case (lì la misura l'ultrasuono). Poi la stessa cosa a **destra**. Una presa per lato, 2 volte.
 - **Durata:** 8–10 s a presa.
-- **In più:** se il casco o la striscia LED reagiscono dal lato giusto, falli entrare nell'inquadratura. È l'inquadratura migliore per mostrare "sa da che parte arriva".
 
-### R4 · Registrazione dello schermo di /test sul Mac
-- **Cosa:** sul Mac apri `http://172.20.10.2:8000/test`, schermo intero, e registra con QuickTime (File → Nuova registrazione schermo, solo la finestra del browser) mentre rifai la R1 e la R3.
-- **Perché:** si vedono i riquadri, la distanza in cm e il tempo all'impatto. È la prova che l'AI gira davvero.
-- **Durata:** 30 s totali, una presa sola.
+### 5 · Il caschetto (va raccontato bene: ha un atto tutto suo)
+- **5a · LED a sinistra:** casco indossato, inquadratura di tre quarti da dietro, stretta su testa e spalle. La macchinina passa a sinistra e si accende **solo la zona sinistra** della striscia. 8 s, 3 prese.
+- **5b · LED a destra:** uguale, dal lato destro. 8 s, 3 prese.
+- **5c · Luce posteriore vista da chi arriva:** telefono basso, dietro il casco, come se fosse il guidatore che segue. Si accende la zona di dietro. 5 s, 2 prese.
+- **5d · Primo piano della scheda:** UNO Q con il Grove shield sul retro del casco, LED verde acceso. Avvicinamento lento di 10 cm in 5 s. Poi il modulo sensore in alto. Prima togliete o sistemate lo scotch che riflette.
+- **5e · Il fail-safe:** spegnete la Pi o staccate il collegamento e riprendete la striscia che lampeggia ambra. 6 s. (Facoltativa, ma dimostra una scelta di progetto forte.)
+- **5f · Casco in mano che ruota lentamente**, striscia accesa, sfondo scuro. 6 s. Mi serve anche per far combaciare il 3D con il casco vero.
+- **Importante:** ditemi se le zone le accende la Pi vera o il simulatore `sender.py`. Nel video lo racconto in modo diverso.
 
-### R5 · L'hardware da vicino
-Quattro inquadrature brevi, ferme o con un movimento lentissimo (avvicinarsi di 10 cm in 4 s):
-1. Webcam + HC-SR04 di fronte, come li vede chi arriva da dietro. Il sensore ad ultrasuoni deve sembrare "due occhi".
-2. La Raspberry Pi 4 con i cavi, di tre quarti.
-3. Il display 7" acceso sulla dashboard.
-4. L'Arduino UNO Q del casco (o la striscia LED accesa).
-- **Durata:** 4–5 s ciascuna. Una presa basta, due se tremano.
+### 6 · Display 7" della Pi
+- Lo schermo acceso con la dashboard mentre la macchinina si avvicina. Inquadratura stretta, di tre quarti, per evitare i riflessi. 6–8 s. 2 prese.
 
-### R6 · Il casco che avvisa (solo bici)
-- **Se il casco funziona:** qualcuno lo indossa, inquadratura di profilo stretta su testa e spalle. La macchinina (o la demo simulata) fa scattare l'avviso: i LED sulla tempia si accendono dal lato giusto, poi il bip sul rosso. Se c'è la funzione "specchietto": gira la testa e si accende verde o rosso.
-- **Se non funziona:** salta la ripresa, la sostituisco con il casco in 3D. Dimmelo e basta.
-- **Durata:** 8–10 s, 3 prese.
+### 7 · La parte di Daniele, Gianluca e Nicolò: caduta e mappa di Torino
+- **7a:** il casco cade di lato su un cuscino e resta fermo (come nel vostro protocollo prove). 5 s.
+- **7b:** registrazione schermo del Mac sulla mappa di `casco-sentinella` (QuickTime, solo la finestra del browser) quando arriva l'evento: il punto che compare sulla mappa, e la pagina `/emergenza`. 15 s.
+- **7c:** se c'è, la dashboard del Comune (`/comune`) con la heatmap. 5 s.
 
 ---
 
-## Facoltative (migliorano il video, ma si può fare senza)
+## Facoltative
+- **F1 · Il case montato su una bici:** bici sul cavalletto, case fissato dietro la sella. Giro lento di 90° attorno alla bici in 6 s. Con il cartone va benissimo.
+- **F2 · Il case stampato in 3D:** solo se esce in tempo. Le stesse 3a e 3b, con il case stampato.
+- **F3 · Mezzi veri per strada:** dal marciapiede, 4 s ciascuno: un bus GTT, un furgone, un'auto vecchia, un monopattino. Niente targhe leggibili, niente volti in primo piano.
+- **F4 · La squadra al lavoro:** mani sulla tastiera, il casco sul tavolo, qualcuno che guarda lo schermo. 3 s ciascuna.
+- **F5 · La squadra davanti alla demo** (per il finale): 3 s, tutti in campo, guardate pure in camera.
 
-### F1 · La scatola montata su una bici
-Bici ferma sul cavalletto, scatola fissata dietro sotto la sella o sul portapacchi. Inquadratura che gira lentamente attorno alla bici (giro di 90° in 6 s), poi dettaglio sulla scatola. Se c'è il case stampato in 3D, usalo. 2 prese.
+## Foto per Devpost (5)
+1. Il case di cartone di fronte, sfondo pulito.
+2. Tutto il sistema sul tavolo: case, Pi, display, iPhone con /vista, macchinina.
+3. Screenshot dell'iPhone su /vista (screenshot, non foto).
+4. Il casco con i LED accesi, una foto di lato e una del retro con la scheda.
+5. La squadra.
 
-### F2 · Mezzi veri per strada a Torino
-Dal marciapiede, telefono fermo, 4 s ciascuna: un bus GTT, un furgone, un'auto vecchia, un monopattino, una bici nel traffico. Riprendi da dietro o di tre quarti, **niente targhe leggibili e niente volti in primo piano**. Bastano 4–5 clip. Servono per la scena "chi resta senza ADAS".
+## Già pronto, non serve girarlo
+- Video reali annotati dal nostro modello: `prova_mezzo/annotati_gs26n/` (notte, camion, moto, bici). Scelgo io i momenti migliori.
+- La vista 3D in simulazione e tutte le scene 3D, compreso il case dal file STL.
 
-### F3 · Il montaggio in time-lapse
-Telefono fermo dall'alto, app Fotocamera in modalità Time-lapse: dalla scatola sul tavolo a scatola fissata alla bici (o a un'auto). 30–60 s reali.
-
-### F4 · Al buio
-Stessa R1 con la stanza in penombra e una torcia del telefono accesa sulla macchinina a fare da faro. Serve solo se la Pi riconosce ancora la macchinina: controlla `/test` prima di girare.
-
-### F5 · La squadra al lavoro
-Due o tre clip da 3 s: mani sulla tastiera, saldatura, qualcuno che guarda lo schermo. Di spalle o di lato va benissimo.
-
----
-
-## Foto per Devpost (servono anche queste, 5 foto)
-1. La scatola con webcam e HC-SR04, di fronte, su sfondo pulito.
-2. Tutto il sistema sul tavolo: scatola, Pi, display acceso, macchinina.
-3. Lo schermo dell'iPhone con la vista 3D (screenshot, non foto).
-4. Il casco con i LED accesi (se funziona).
-5. La squadra, anche informale.
-
----
-
-## Già pronto, non devi girarlo
-- `prova_mezzo/annotati_gs26n/notte.mp4`, `camion.mp4`, `moto.mp4`, `bici.mp4`: video veri annotati dal modello addestrato da noi.
-- La vista 3D in modalità simulata (`/vista?demo`): la registro io.
+## Sulla stampa 3D
+Il case del file `Body2.stl` misura 16 × 9 × 12,7 cm e ha circa 98 cm³ di plastica (circa 120 g di PLA). Su una P1S, a qualità normale, sono probabilmente 2–3 ore: partendo alle 14:30 non è pronto per il video e forse nemmeno per le 16:00. Se volete averlo per la demo davanti ai giudici, stampatelo in bozza (strato 0,28 mm, riempimento 10%, pareti 2).
