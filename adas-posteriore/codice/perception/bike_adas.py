@@ -132,8 +132,20 @@ def parse_args():
     g.add_argument("--stream", action="store_true", help="video annotato su /video.mjpg")
     g.add_argument("--show", action="store_true", help="finestra OpenCV (solo con desktop)")
     g.add_argument("--log-tracks", action="store_true", help="CSV con tutte le tracce, fotogramma per fotogramma")
+    g.add_argument("--giocattolo", type=float, default=None, metavar="CM",
+                   help="demo da tavolo: larghezza vera (cm) del veicolo giocattolo visto da dietro. Le distanze "
+                        "restano in cm veri; ogni veicolo è trattato come largo così, e le persone (chi presenta) "
+                        "vengono ignorate")
     profili_mezzo.aggiungi(p)
-    return profili_mezzo.parse(p)
+    a = profili_mezzo.parse(p)
+    if a.giocattolo:
+        # un giocattolo può essere scambiato per auto, camion o bus: per tutti vale la sua larghezza misurata
+        a.scale = a.giocattolo / 100.0 / CLASSES[2][1]
+        for c in (1, 3, 5, 7):
+            n, _, _, wgt, code = CLASSES[c]
+            CLASSES[c] = (n, CLASSES[2][1], CLASSES[2][2], wgt, code)
+            HEIGHTS[c] = HEIGHTS[2]
+    return a
 
 
 # ---------------------------------------------------------------- utilità
@@ -357,6 +369,8 @@ class Estimator:
             tid, cls, x1, y1, x2, y2 = det[:6]
             if cls not in CLASSES or x2 - x1 < 3:
                 continue
+            if cls == 0 and a.giocattolo:
+                continue  # al tavolo le persone sono chi fa la demo, non un pericolo
             tr = self.tracks.get(tid)
             if tr is None:
                 tr = self.tracks[tid] = Track(tid, cls, t)
