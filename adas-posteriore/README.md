@@ -28,6 +28,6 @@ Sistema che guarda la strada **dietro al ciclista** e lo avvisa quando arriva un
   `cd codice && python -c "from ultralytics import YOLO; YOLO('training/gs26n.pt').export(format='ncnn', imgsz=(192, 480))" && mv training/gs26n_ncnn_model perception/gs26n_192x480_ncnn_model`.
   Se manca, `bike_adas.py` usa da solo YOLO26n originale (`yolo26n_192x480_ncnn_model`, scaricato ed esportato al primo avvio).
 - [`codice/training/`](codice/training/) contiene gli script di addestramento (`label.py` etichetta i video con un modello grande, `static_filter.py` toglie i fotogrammi fermi, `train.py` addestra, `val.py` valuta). I percorsi del dataset sono quelli della macchina dove è stato addestrato: vanno adattati.
-- Dashboard su `http://<ip-pi>:8000`, confronto camera/ultrasuono su `/test`, vista per telefono in stile Tesla su `http://<ip-pi>:8000/vista` (`/vista?demo` mostra traffico simulato, senza camera).
+- Dashboard su `http://<ip-pi>:8000`, confronto camera/ultrasuono su `/test`, vista per telefono in stile Tesla su `http://<ip-pi>:8000/vista` (`/vista?demo` mostra traffico simulato senza camera, `/vista?tema=chiaro` usa il tema chiaro).
 
 Il token Telegram va in una variabile d'ambiente (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`), mai nel repository.
